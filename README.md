@@ -82,6 +82,17 @@
 > ⚠️ **addon 版本锁死在 3.1.5。** DSH 插件的后端固定在 3.1.5，而上游最新已是 v4.3.0，
 > 两者混用未经验证 —— **不要用 AssetLib 去升级它**。
 
+**DSH 侧的两个环境前提**（换机器、或清了 uv 缓存后要重做）：
+
+1. **`uvx` 必须在 PATH 上。** 插件靠 `uvx --from godot-ai==3.1.5 …` 拉起 MCP 后端。
+   装法：`powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"`
+2. **必须设 `UV_PYTHON=3.13`**：`setx UV_PYTHON 3.13`，然后重启 DSH。
+   不设的话 uv 会挑最新的 CPython（3.15），而 `pyyaml` 在 3.15 上**没有预编译轮子**，
+   uv 会退去源码编译，再因为缺 MSVC 构建工具而失败。
+
+> 第 2 条是实测结论，不是猜测。不设时报的是：
+> `Failed to build pyyaml==6.0.3 … Microsoft Visual C++ 14.0 or greater is required`。
+
 ---
 
 ## 两条规矩
