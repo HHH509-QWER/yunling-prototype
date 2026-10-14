@@ -10,16 +10,18 @@
 
 ## 怎么跑
 
-用 Godot 4.4 打开这个文件夹，或者命令行：
+用 Godot 4.7.2 打开这个文件夹，或者命令行：
 
 ```bat
-..\gu_tools\Godot_v4.4-stable_win64.exe --path .
+..\gu_tools\Godot_v4.7.2-stable_win64.exe --path .
 ```
+
+> `gu_tools` 里同时留着 4.4 的两个 exe —— 那是给 `gu\` 用的，**不要拿它开这个工程**。
 
 ## 怎么跑自测
 
 ```bat
-..\gu_tools\Godot_v4.4-stable_win64_console.exe --headless --path . -- --selftest
+..\gu_tools\Godot_v4.7.2-stable_win64_console.exe --headless --path . -- --selftest
 ```
 
 看到 `失败 0 项`、退出码 0 就是好的。
@@ -62,8 +64,23 @@
 | [scripts/Dummy.gd](scripts/Dummy.gd) | 假人：被打会掉血 |
 | [scripts/Game.gd](scripts/Game.gd) | 主控：搭世界、伤害判定、自测 |
 | [scenes/Main.tscn](scenes/Main.tscn) | 唯一的场景，只有 6 行 |
+| [addons/godot_ai/](addons/godot_ai/) | **第三方**：Godot AI 3.1.5 插件，让 DSH 的 Godot Creator 能读写编辑器、跑游戏、看日志与画面。**不是本工程的代码，不要改它** |
 | [设计圣经.md](设计圣经.md) | 设定。**冻结**，改动要写明理由 |
 | [开发计划.md](开发计划.md) | 本周做什么、怎么验收。**活文档** |
+
+---
+
+## 和 DSH 的 Godot Creator 一起用
+
+本工程装了 **Godot AI 3.1.5**（[addons/godot_ai](addons/godot_ai)），DSH 侧装了 `dsh-godot-ai@0.7.0`，两者配套。
+
+1. 用 Godot **4.7.2** 打开本工程，并**保持编辑器开着** —— 关掉它，AI 就看不到场景树。
+2. **项目 → 项目设置 → 插件** 里确认 **Godot AI** 已启用。
+3. DSH 的 **设置 → Godot AI** 卡片里确认连接状态与目标项目。
+4. 新建 DSH 会话时选 **Godot Creator** 模式。
+
+> ⚠️ **addon 版本锁死在 3.1.5。** DSH 插件的后端固定在 3.1.5，而上游最新已是 v4.3.0，
+> 两者混用未经验证 —— **不要用 AssetLib 去升级它**。
 
 ---
 
