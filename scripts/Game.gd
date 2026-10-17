@@ -78,6 +78,17 @@ var merchant_stock: Dictionary = {}
 var _pass := 0
 var _fail := 0
 
+## ⭐ M31.3：自测**基线只看下界**。文档曾写 583、实测 584、grep 得 582 —— 三个数字打架的根因是
+##    断言数本来就随代码增长而变。**锁死"恰好 584"是脆的**：谁加一条断言就红，谁删一条也红，
+##    两种红长得一样，逼人去人工判断"是涨了还是跌了"—— 而人工判断正是会漏的环节。
+##    所以只锁下界：只能涨不能跌。删断言 → 红；加断言 → 绿并打印实际值。
+const SELFTEST_MIN := 584
+## 自测**有没有跑完**的标记（防假绿灯，见 `_selftest_finish()`）。
+var _st_started := false
+var _st_done := false
+var _st_finished := false
+var _st_manual_tick := false      # 自测手动喂 `_process` 时置 1（免得被当成"该收尾了"）
+
 
 func _ready() -> void:
 	font = GameData.make_font()
@@ -1259,6 +1270,14 @@ func _on_seal_panel_closed() -> void:
 
 
 func _process(delta: float) -> void:
+	# ⭐ M31.3：自测收尾的**兜底调用** —— 必须放在 `_process` 的第一行。
+	#    主体在 `_ready` 里跑；一旦它抛异常，`_ready` 整个中断、收尾就永远不到，
+	#    而这里下一帧照样会执行 → 收尾（打印汇总 + 非 0 退出）一定发生，假绿灯不可能再出现。
+	#    ⚠️ 自测自己会**手动**喂 `_process`（见 `_st_manual_tick`）—— 那次不能触发收尾，
+	#    否则主体才跑一半就被提前收尾（踩过：117 项就打印了汇总）。
+	if _st_started and not _st_finished and not _st_manual_tick:
+		_selftest_finish()
+		return
 	# 相机跟住主角（M7）。⭐ 必须放在最前面 —— 下面有个 hits 为空就短路 return
 	if camera != null and player != null and is_instance_valid(player):
 		camera.global_position = player.position
@@ -1511,9 +1530,22 @@ func _test_loadout() -> void:
 	player.essence = player.essence_max
 
 
+## ⭐ M31.3：**假绿灯**修的是结构，不是某一行。
+##    历史坑：`camera.zoom` 那一行若在 Camera3D 下抛异常，会中断整个 `_run_selftest()`，
+##    而收尾的 `quit()` 在异常路径下不执行 → 进程以 0 退出 = **崩了却看起来全过**。
+##    ⚠️ GDScript **没有 try/catch**（4.x 至今没实现），所以单条断言的异常**抓不住**；
+##    能做的、也必须做的是：**让"没跑完"本身变成一次 FAIL**。
+##    做法：主体跑在 `_run_selftest_body()`，只有全程没抛异常才会走到 `_st_done = true`；
+##    收尾 `_selftest_finish()` 由 `_process()` 兜底调用 —— 主体抛异常也照样执行。
 func _run_selftest() -> void:
 	selftest = true                 # ⭐ 自测绝不写盘
+	_st_started = true
 	print("=== 《蕴灵印》自测 ===")
+	_run_selftest_body()
+	_selftest_finish()
+
+
+func _run_selftest_body() -> void:
 	_build_world()
 
 	# 1. 世界搭起来了吗
@@ -2123,7 +2155,9 @@ func _run_selftest() -> void:
 	# 相机：跟住主角 + 边界就是世界
 	player.position = spawn_point
 	camera.global_position = Vector2.ZERO
+	_st_manual_tick = true            # ⭐ 告诉 `_process`：这是自测在手动喂帧，不是该收尾了
 	_process(0.016)
+	_st_manual_tick = false
 	_check("相机跟住了主角", camera.global_position.is_equal_approx(player.position),
 			"相机在 %s，主角在 %s" % [camera.global_position, player.position])
 	_check("相机边界 = 世界矩形，不会拍到地图外",
@@ -4500,5 +4534,22 @@ func _run_selftest() -> void:
 	_check("同一格内自由移动（不会被自己的格子挡住）",
 			GameData.can_step(Vector2(100.0, 100.0), Vector2(104.0, 103.0)), "同格微动")
 
+	_st_done = true                  # ⭐ 只有全程没抛异常才会走到这（假绿灯的判据）
+
+
+## ⭐ 自测收尾：**异常路径也必须执行**。
+##    正常路径由 `_run_selftest()` 直接调；主体中途抛异常时由 `_process()` 兜底调 —— 见下面的守卫。
+##    ⚠️ `_st_finished` 保证只跑一次（两条路径不会重复 quit）。
+func _selftest_finish() -> void:
+	if _st_finished:
+		return
+	_st_finished = true
+	var total := _pass + _fail
+	if not _st_done:
+		# ⭐ 这才是"假绿灯"的根因修法：没跑完 ≠ 全过，它是一次明确的失败。
+		_fail += 1
+		print("[FAIL] 自测**没跑完**（中途抛异常中断，只完成 %d 项）—— 这不是绿灯" % total)
+	_check("断言总数不低于基线 %d（只能涨不能跌；删断言必红）" % SELFTEST_MIN,
+			total >= SELFTEST_MIN, "实际 %d 项" % total)
 	print("通过 %d 项，失败 %d 项" % [_pass, _fail])
 	get_tree().quit(1 if _fail > 0 else 0)
