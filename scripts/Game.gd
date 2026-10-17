@@ -778,6 +778,24 @@ func take_snapshot() -> void:
 	# ⭐ 用户决定「连境界一起倒流」（严格照 §4.3）：所以修为也在快照里。
 	snapshot = _snapshot_dict()
 
+## ⭐ M31 Step 0：列出**落在世界矩形之外的内容点**。正常应返回空数组。
+##    ⚠️ 为什么要有它：改世界尺寸 / 重排内容点时，坐标烤出界是**静默**的 ——
+##    不报错、不崩溃，只是玩家永远走不到那儿。带印的精英一旦出界，那枚印就成了死档。
+##    ⚠️ Step 1 加 `sites` 表后，把 sites 也扫进来（现在只有 ENEMY_SPAWNS 与 GATHER.spots）。
+func content_out_of_world() -> Array:
+	var ws3: Vector2 = GameData.WORLD["size"]
+	var out: Array = []
+	for spec: Dictionary in GameData.ENEMY_SPAWNS:
+		var p: Vector2 = spec["pos"] as Vector2
+		if p.x < 0.0 or p.y < 0.0 or p.x > ws3.x or p.y > ws3.y:
+			out.append("%s@%s" % [str(spec.get("id", "?")), str(p)])
+	for spot: Dictionary in GameData.GATHER["spots"]:
+		var gp: Vector2 = spot["pos"] as Vector2
+		if gp.x < 0.0 or gp.y < 0.0 or gp.x > ws3.x or gp.y > ws3.y:
+			out.append("%s@%s" % [str(spot.get("id", "?")), str(gp)])
+	return out
+
+
 ## 快照的字典本体。⭐ 抽出来是因为**时间线的每一帧**也要存一份同样的东西。
 func _snapshot_dict() -> Dictionary:
 	var es: Array = []
@@ -4270,6 +4288,15 @@ func _run_selftest() -> void:
 			and is_equal_approx(float(GameData.WORLD_ROWS) * GameData.WORLD_CELL, GameData.WORLD["size"].y),
 			"%d×%.0f=%d vs %s" % [GameData.WORLD_COLS, GameData.WORLD_CELL,
 				int(GameData.WORLD_COLS * GameData.WORLD_CELL), str(GameData.WORLD["size"])])
+
+	## ⭐⭐ M31 Step 0：**所有内容点的坐标必须落在世界矩形内**。
+	##    起因：这次世界从 5120 宽收窄到 3584 宽 —— 若按字面把 wscl 固定成 (4,4) 烘焙，
+	##    **13 个敌人里 7 个、8 个采集点里 2 个会落到世界之外**，其中两只精英带印，玩家永远够不到。
+	##    那次是人工算出来的，下次不一定有人算 → 把这条升级成断言，谁烤出界都会红。
+	##    ⚠️ Step 1 出 `sites` 表后，把 sites 也加进 `content_out_of_world()` 的扫描名单。
+	var oob: Array = content_out_of_world()
+	_check("所有内容点（敌人 / 采集点）的坐标都在世界矩形内", oob.is_empty(),
+			"越界 %d 个：%s" % [oob.size(), str(oob)])
 	var cliff_cnt := 0
 	var deep_cnt := 0
 	var elev_min := 1.0
