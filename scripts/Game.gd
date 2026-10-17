@@ -329,7 +329,9 @@ func _draw_puff(cx: float, cy: float, w: float, a: float) -> void:
 ##
 ## ⚠️ 三条纪律：
 ##   ① alpha 压得很低（≤0.34）+ 下缘三层渐隐 —— 绝不遮住怪和采集点；
-##   ② 自测模式跳过（有像素比对探针，别让它翻红）；
+##   ② 自测模式跳过（与 `_draw_far()` 一致：自测不跑表现层，省得 headless 里空转）；
+##      ⚠️ 更正一处旧注释：`tests/fx_probe.tscn` 是**独立场景**，根本不加载 Game.gd，
+##         它翻不翻红和这里没关系 —— 真正的原因只是"自测不测表现层"。
 ##   ③ **必须把 transform 复位**：`draw_set_transform` 会影响之后所有绘制调用。
 const RIDGE_STEP := 128.0
 const RIDGE_W := 4352.0          # 够宽：视差位移 0.65×3584 + 一屏，走到东边也不会露出端点
@@ -372,8 +374,13 @@ func _draw_ridges() -> void:
 	draw_rect(Rect2(Vector2(ctr.x - half.x, top_y), Vector2(span, 64.0)), Color(0.62, 0.69, 0.78, 0.10))
 	for L in range(2):
 		var par := float(RIDGE_PAR[L])
-		## -300：保证相机走到世界最东/最西端时，山脊仍完整盖住屏幕（推导见 RIDGE_W 注释）
-		var tx := (1.0 - par) * ctr.x - 300.0
+		## ⭐ 左端外扩量**跟着视口算**，不能写死常数（原来写的是 -300，复核时改掉）：
+		##    记可见左边缘 u = ctr.x - half.x（相机被 limit 夹住时 u ≥ 0），要求 tx ≤ u 恒成立。
+		##    取 tx = (1-par)*(ctr.x - half.x) - 48  →  tx - u = -par*u - 48 ≤ 0，**任意视口宽都成立**。
+		##    ⚠️ 写死 -300 为什么不行：`window/stretch/aspect = "expand"`，视口宽会随窗口变，
+		##       half.x 不是定值；窗口拉宽到 ~1460px 以上时远层（par=0.18）左端会缩进屏幕里露馅。
+		##    右端由 RIDGE_W 兜住（余量 3000+，任何现实视口都够），所以只改左边这一项。
+		var tx := (1.0 - par) * (ctr.x - half.x) - 48.0
 		draw_set_transform(Vector2(tx, base_y), 0.0, Vector2.ONE)
 		draw_colored_polygon(_ridge_polys[L], RIDGE_COL[L] as Color)
 		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)      # ⚠️ 必复位
