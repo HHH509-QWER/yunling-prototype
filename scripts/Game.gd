@@ -463,6 +463,11 @@ func _draw_world_height() -> void:
 	var cell := GameData.WORLD_CELL
 	## ⭐ M30.25：**只画可见格子** —— 世界变成 160×90 = 14400 格，全画是自杀。
 	##    可见范围 = 相机中心 ± 视口/zoom 的一半，再外扩 2 格（防止边缘露白）。
+	## ⭐ M31.3 复核修正：**下缘的 padding 必须把海拔抬升算进去**（原来是写死的 2 格 = 64）。
+	##    裁剪判的是**未抬升**的格角 (cx*cell, cy*cell)，画的时候却往上挪了 e*ELEV_LIFT
+	##    —— 高格子会被抬进可见区、却又被裁掉，屏幕**下缘缺格**。
+	##    抬升是**向上**的，所以只有下缘要补；补一个通道上限（e = 世界图 g 通道 ∈ [0,1]）
+	##    最稳：这样**任意 ELEV_LIFT** 都不缺格，且不依赖烘焙表里的具体海拔上限。
 	var vis_r := Rect2(Vector2.ZERO, Vector2(2048.0, 2048.0))
 	if is_instance_valid(camera):
 		var z9 := camera.zoom
@@ -471,7 +476,10 @@ func _draw_world_height() -> void:
 		## ⚠️ 不能用 camera.get_screen_center_position()：在 _draw 里它可能还没更新，
 		##    结果整屏都落在裁剪框外 → **画面全黑**（踩过一次）。用玩家位置最稳。
 		var ctr9 := player.position if (player != null and is_instance_valid(player)) else camera.global_position
-		vis_r = Rect2(ctr9 - half - Vector2(cell, cell) * 2.0, half * 2.0 + Vector2(cell, cell) * 4.0)
+		var pad_up := cell * 2.0
+		var pad_dn := cell * 2.0 + GameData.ELEV_LIFT      # ⭐ 下缘 += 最大抬升量
+		vis_r = Rect2(ctr9 - half - Vector2(cell * 2.0, pad_up),
+				half * 2.0 + Vector2(cell * 4.0, pad_up + pad_dn))
 	for c in _world_order:
 		if not vis_r.has_point(Vector2(float(c[1]) * cell, float(c[2]) * cell)):
 			continue
