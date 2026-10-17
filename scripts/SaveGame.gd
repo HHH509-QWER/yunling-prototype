@@ -5,7 +5,12 @@ extends RefCounted
 ##    不会污染真存档；磁盘读写只是薄薄一层包装。
 ## ⚠️ 不写 class_name（新增全局类名要先由编辑器扫描，否则命令行自测直接报错）。
 
-const VERSION := 7      # 2：灵印等级/商人货架；7：世界放大 4 倍（M30.25）
+const VERSION := 8      # 2：灵印等级/商人货架；7：世界放大 4 倍（M30.25）；8：世界容器改尺寸（M31）
+## ⭐ M31 Step 0：世界容器从 5120×2880 改成 3584×3072 —— 旧档坐标按比例缩放后 clamp，
+##    否则一读档就跑到图外（纵横比也变了，必须**分轴**缩放，不能只乘一个数）。
+const VERSION_WORLD_RESIZE := 8
+## v7 及之前的世界尺寸。⭐ 从它到 GameData.WORLD["size"] 的比值就是迁移系数。
+const WORLD_SIZE_V7 := Vector2(5120.0, 2880.0)
 ## ⭐ M30.25：世界从 1280×720 放大到 5120×2880（4×4 屏）—— 旧档坐标要 ×4，否则一读档就跑到左上角。
 const VERSION_WORLD_QUAD := 7
                         # 3：炼化度从「养熟度」变成「融合度 = 使用前提」，旧档要补满
@@ -56,6 +61,11 @@ static func from_dict(game, data: Dictionary) -> bool:
 	# ⭐ 迁移：v7 起世界**放大 4 倍**（5120×2880）。旧档坐标 ×4 才落在同一片地形上。
 	if int(data.get("version", 0)) < VERSION_WORLD_QUAD:
 		game.spawn_point *= 4.0
+	# ⭐ 迁移：v8 起世界容器**改尺寸**（5120×2880 → 3584×3072）。
+	#    旧档坐标按**分轴比例**缩放（×0.7 / ×1.0667）才落在同一片地形上。
+	#    ⚠️ 不能只乘一个数：纵横比从 16:9 变成 7:6，等比缩放会把出生点挤偏。
+	if int(data.get("version", 0)) < VERSION_WORLD_RESIZE:
+		game.spawn_point *= GameData.WORLD["size"] / WORLD_SIZE_V7
 	# 兜底：坐标一律夹进世界内（手改坏的存档也不至于把主角丢到图外）
 	var ws: Vector2 = GameData.WORLD["size"]
 	game.spawn_point = Vector2(clampf(game.spawn_point.x, 0.0, ws.x),

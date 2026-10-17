@@ -3222,7 +3222,7 @@ func _run_selftest() -> void:
 			"%.0f → %.0f（灵力 %.0f）" % [m25_low, player.essence_max, player.essence])
 	player.realm = 1
 	player.refill()
-	_check("存档版本号是 7（+ 世界放大 4 倍）", int(SaveGameScript.VERSION) == 7,
+	_check("存档版本号是 8（+ 世界容器改尺寸）", int(SaveGameScript.VERSION) == 8,
 			"%d" % int(SaveGameScript.VERSION))
 
 	# ⭐ 接线：E 必须真的走到 try_interact（否则「E 交易 / E 突破」的提示是空话）
@@ -3576,18 +3576,43 @@ func _run_selftest() -> void:
 			"灰烬 %.0f" % player.refine_of("灰烬印"))
 	_test_loadout()
 
-	# 7. 旧档迁移（M29）：v4 的坐标是**世界减半前**的，读进来必须减半
+	# 7. 旧档迁移链：v4 →（减半）→（×4）→（v8 改尺寸按比例）→ 世界中心
+	#    ⭐ 迁移是**链式**的：每一条只管自己那一段，所以 v4 档要把 v5/v7/v8 三段全走一遍。
 	var v4_save: Dictionary = SaveGameScript.to_dict(self)
 	v4_save["version"] = 4
 	v4_save["anchor"] = [1280.0, 720.0]        # 旧世界的正中心
 	SaveGameScript.from_dict(self, v4_save)
-	_check("读 v4 旧档：先按旧规则减半、再按 v7 放大 4 倍（1280,720 → 2560,1440）",
-			spawn_point.is_equal_approx(Vector2(2560.0, 1440.0)), str(spawn_point))
+	_check("读 v4 旧档：减半 → ×4 → 按 v8 比例缩放（1280,720 → 世界中心 %s）" % str(GameData.WORLD["size"] * 0.5),
+			spawn_point.is_equal_approx(GameData.WORLD["size"] * 0.5), str(spawn_point))
 	var v5_save: Dictionary = SaveGameScript.to_dict(self)
-	v5_save["anchor"] = [1280.0, 720.0]        # 已经是新世界的坐标
+	v5_save["version"] = 5
+	v5_save["anchor"] = [1280.0, 720.0]        # v5 世界（减半后）的坐标
 	SaveGameScript.from_dict(self, v5_save)
-	_check("读 v5 新档：坐标原样读回（不做迁移）",
-			spawn_point.is_equal_approx(Vector2(1280.0, 720.0)), str(spawn_point))
+	_check("读 v5 旧档：只走 ×4 与 v8 缩放（1280,720 → 3584,3072）",
+			spawn_point.is_equal_approx(Vector2(3584.0, 3072.0)), str(spawn_point))
+	# 8. 旧档迁移（M31 Step 0）：v7 的坐标是**旧世界** 5120×2880 的，读进来必须按比例缩放
+	var v7_save: Dictionary = SaveGameScript.to_dict(self)
+	v7_save["version"] = 7
+	v7_save["anchor"] = [2560.0, 1440.0]        # 旧世界的正中心
+	SaveGameScript.from_dict(self, v7_save)
+	_check("读 v7 旧档：按分轴比例缩放（旧中心 2560,1440 → 新中心 1792,1536）",
+			spawn_point.is_equal_approx(GameData.WORLD["size"] * 0.5), str(spawn_point))
+	_check("迁移系数是分轴的（x ×0.7 / y ×1.0667，纵横比变了）",
+			is_equal_approx(SaveGameScript.WORLD_SIZE_V7.x * 0.7, GameData.WORLD["size"].x)
+			and is_equal_approx(SaveGameScript.WORLD_SIZE_V7.y * (3072.0 / 2880.0), GameData.WORLD["size"].y),
+			"%s → %s" % [str(SaveGameScript.WORLD_SIZE_V7), str(GameData.WORLD["size"])])
+	var v8_save: Dictionary = SaveGameScript.to_dict(self)
+	v8_save["anchor"] = [1000.0, 500.0]        # 已经是新世界的坐标
+	SaveGameScript.from_dict(self, v8_save)
+	_check("读 v8 新档：坐标原样读回（不做迁移）",
+			spawn_point.is_equal_approx(Vector2(1000.0, 500.0)), str(spawn_point))
+	# 9. 兜底：手改坏的存档也不能把主角丢到图外
+	var v8_out: Dictionary = SaveGameScript.to_dict(self)
+	v8_out["anchor"] = [99999.0, -500.0]
+	SaveGameScript.from_dict(self, v8_out)
+	#    ⚠️ 分轴夹取：x 夹到右边界、y 夹到上边界 —— 不是整体夹到同一个角
+	_check("越界坐标一律夹进世界内", spawn_point.is_equal_approx(Vector2(GameData.WORLD["size"].x, 0.0)),
+			str(spawn_point))
 	spawn_point = GameData.WORLD["size"] * 0.5
 
 	# ==================== M20：闪避与冲刺（由灵印解锁）====================
