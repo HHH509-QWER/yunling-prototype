@@ -292,14 +292,95 @@ func _draw_far() -> void:
 
 
 ## ⭐ M30.27：**云带**（前景薄雾）—— 低透明度、缓慢横向漂移，给画面"气"。
+## ⭐ M31.3：**云从"三条矩形"改成"一团"** —— 一团 = 6 个半径不同的重叠圆，
+##    边缘靠圆的交叠堆出来，不再是方角。之前那版是 `draw_rect`，一眼看得出是条。
+##    ⚠️ 全部由**时间与序号**算（无随机数）→ 每帧稳定、不会闪。
 func _draw_clouds() -> void:
 	var ws: Vector2 = GameData.WORLD["size"]
 	var t := float(Time.get_ticks_msec()) / 1000.0
 	for b in range(3):
-		var yy := ws.y * (0.22 + 0.34 * float(b)) + sin(t * 0.15 + float(b)) * 26.0
-		var xx := fmod(t * (7.0 + float(b) * 5.0) + float(b) * 900.0, ws.x + 900.0) - 450.0
-		draw_rect(Rect2(xx, yy, 640.0, 60.0 + float(b) * 18.0), Color(0.72, 0.78, 0.84, 0.045))
-		draw_rect(Rect2(xx + 90.0, yy + 14.0, 420.0, 34.0), Color(0.78, 0.84, 0.88, 0.035))
+		var yy := ws.y * (0.20 + 0.30 * float(b)) + sin(t * 0.13 + float(b)) * 20.0
+		var xx := fmod(t * (6.0 + float(b) * 4.0) + float(b) * 1400.0, ws.x + 1200.0) - 600.0
+		_draw_puff(xx, yy, 150.0 - 34.0 * float(b), 0.055 - 0.007 * float(b))
+
+
+## 一团云：6 个圆叠出蓬松边缘（比矩形贵不了多少，但一眼就是云）
+func _draw_puff(cx: float, cy: float, w: float, a: float) -> void:
+	var col := Color(0.78, 0.84, 0.90, a)
+	draw_circle(Vector2(cx, cy), w * 0.30, col)
+	draw_circle(Vector2(cx + w * 0.02, cy + w * 0.11), w * 0.24, col)
+	draw_circle(Vector2(cx - w * 0.26, cy + w * 0.07), w * 0.21, col)
+	draw_circle(Vector2(cx + w * 0.29, cy + w * 0.05), w * 0.19, col)
+	draw_circle(Vector2(cx - w * 0.10, cy - w * 0.13), w * 0.18, col)
+	draw_circle(Vector2(cx + w * 0.13, cy - w * 0.11), w * 0.16, col)
+
+
+## ⭐ M31.3：**远山剪影**（两层 + 空气透视）—— 「修仙界」里"大"的那一半。
+##
+## **为什么画在世界之后、而不是之前**：俯视角没有地平线，世界铺满整屏，
+##    画在背景层会被地形整片盖掉、一点都看不见。山必须落在**屏幕顶部那条带**上，
+##    压在地形之上 —— 那一条带在玩家眼里就是"北边、很远"。
+##
+## **为什么用缓存折线 + draw_set_transform**：项目红线是 `_draw()` 里不许分配。
+##    山脊形状是**静态**的（只由峰序号决定），所以只建一次，每帧只挪绘制原点。
+##
+## **视差**：远层 0.18 / 近层 0.35 —— 挪得越慢，大脑读成越远。
+## **空气透视**：远层更淡更青蓝、近层更实更深（现实里越远越被空气"洗白"）。
+##
+## ⚠️ 三条纪律：
+##   ① alpha 压得很低（≤0.34）+ 下缘三层渐隐 —— 绝不遮住怪和采集点；
+##   ② 自测模式跳过（有像素比对探针，别让它翻红）；
+##   ③ **必须把 transform 复位**：`draw_set_transform` 会影响之后所有绘制调用。
+const RIDGE_STEP := 128.0
+const RIDGE_W := 4352.0          # 够宽：视差位移 0.65×3584 + 一屏，走到东边也不会露出端点
+const RIDGE_BAND := 150.0        # 山脚相对屏幕顶的位置（世界像素）
+const RIDGE_PAR := [0.18, 0.35]  # 远层 → 近层（视差系数，越小越远）
+const RIDGE_COL := [Color(0.58, 0.65, 0.75, 0.24), Color(0.38, 0.44, 0.55, 0.32)]
+var _ridge_polys: Array[PackedVector2Array] = []
+
+
+## 峰高只由 (序号, 层) 决定 → 同一座山永远一样高，不闪、不抖
+func _ridge_poly(layer: int) -> PackedVector2Array:
+	var pts := PackedVector2Array()
+	var n := int(RIDGE_W / RIDGE_STEP)
+	pts.append(Vector2(0.0, 0.0))
+	for i in range(n):
+		var x0 := float(i) * RIDGE_STEP
+		var r1 := float((i * 7919 + layer * 104729) % 997) / 997.0       # 大起伏
+		var r2 := float((i * 104729 + layer * 7919) % 89) / 89.0         # 小锯齿
+		var peak := 46.0 + 52.0 * r1 + 16.0 * r2 + float(layer) * 14.0
+		pts.append(Vector2(x0 + RIDGE_STEP * 0.28, -peak * 0.55))
+		pts.append(Vector2(x0 + RIDGE_STEP * 0.52, -peak))
+		pts.append(Vector2(x0 + RIDGE_STEP * 0.78, -peak * 0.42))
+	pts.append(Vector2(RIDGE_W, 0.0))
+	return pts
+
+
+func _draw_ridges() -> void:
+	if selftest or not is_instance_valid(camera):
+		return
+	if _ridge_polys.is_empty():
+		_ridge_polys = [_ridge_poly(0), _ridge_poly(1)]
+	var z9 := camera.zoom
+	z9 = Vector2(maxf(z9.x, 0.01), maxf(z9.y, 0.01))
+	var half: Vector2 = get_viewport_rect().size / z9 * 0.5
+	var ctr: Vector2 = camera.global_position
+	var top_y := ctr.y - half.y
+	var base_y := top_y + RIDGE_BAND
+	var span := half.x * 2.0
+	## 顶部薄霾：把山脊上缘缝进地形，免得看成"贴在屏幕上的一条带"
+	draw_rect(Rect2(Vector2(ctr.x - half.x, top_y), Vector2(span, 64.0)), Color(0.62, 0.69, 0.78, 0.10))
+	for L in range(2):
+		var par := float(RIDGE_PAR[L])
+		## -300：保证相机走到世界最东/最西端时，山脊仍完整盖住屏幕（推导见 RIDGE_W 注释）
+		var tx := (1.0 - par) * ctr.x - 300.0
+		draw_set_transform(Vector2(tx, base_y), 0.0, Vector2.ONE)
+		draw_colored_polygon(_ridge_polys[L], RIDGE_COL[L] as Color)
+		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)      # ⚠️ 必复位
+	## 下缘渐隐：三层递减 alpha，让山"化"进地里，而不是硬切一条边
+	for k in range(3):
+		draw_rect(Rect2(Vector2(ctr.x - half.x, base_y + float(k) * 30.0), Vector2(span, 30.0)),
+				Color(0.56, 0.63, 0.72, 0.09 - 0.03 * float(k)))
 
 
 func _draw_world() -> void:
@@ -1205,6 +1286,9 @@ func _draw() -> void:
 
 	# ⭐ M30.27：**云带**（前景薄雾）—— 画在实体之后，才有"雾在人和地之间"的层次。
 	_draw_clouds()
+	# ⭐ M31.3：**远山剪影** —— 画在云之后（山比云远）。俯视角没有地平线，
+	#    必须压在地形之上，落在屏幕顶部那条带上才读得出"北边很远的地方有山"。
+	_draw_ridges()
 	# ⭐ M30.24（用户定案）：**那套"地面上撒竹子"不要了**（"太丑"）。
 	#    大世界的尺度感不靠地面装饰，靠**远处的层次**（山影 / 雾 / 空气透视）——
 	#    而那属于**背景层**（要画在 _draw 的最前面），不是这里。
