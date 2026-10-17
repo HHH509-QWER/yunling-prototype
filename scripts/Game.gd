@@ -820,12 +820,15 @@ func restore_snapshot_from(snap: Dictionary) -> void:
 		if is_instance_valid(p):
 			p.queue_free()
 	pickups.clear()
-	for rec: Dictionary in snapshot.get("enemies", []):
+	# ⚠️⚠️ 下面三处**必须读参数 `snap`，不能读全局 `snapshot`** —— 踩过：写成了全局，
+	#    只有一个快照（锚点帧）时看不出来；将来加了第二个槽位（域边界存档），
+	#    跨域回退会静默退到**错误的那一帧**。自测「按票据恢复，而不是按全局快照」守着这一条。
+	for rec: Dictionary in snap.get("enemies", []):
 		_spawn_enemy(str(rec["archetype"]), rec["pos"], str(rec.get("carries", "")), bool(rec.get("elite", false)))
 	for i in range(enemies.size()):
-		enemies[i].hp = float(snapshot["enemies"][i]["hp"])
+		enemies[i].hp = float(snap["enemies"][i]["hp"])
 
-	var gs: Array = snapshot.get("gathers", [])
+	var gs: Array = snap.get("gathers", [])
 	for i in range(gathers.size()):
 		if not is_instance_valid(gathers[i]):
 			continue
@@ -1826,6 +1829,23 @@ func _run_selftest() -> void:
 	_check("快照时已死的敌人不会复活", enemies.size() == alive_at_snapshot,
 			"期望 %d 个，实际 %d 个" % [alive_at_snapshot, enemies.size()])
 	_check("快照时已空的采集点保持空", gathers[0].depleted, "被复原了")
+
+	# 6b. ⭐ restore_snapshot_from 必须按**传进来的票据**恢复，而不是按全局 `snapshot`
+	#     踩过的坑：函数体里写死了全局 snapshot。只有一个锚点快照时**完全看不出来**，
+	#     一旦将来加第二个槽位（域边界存档），跨域回退会静默退到错误的那一帧。
+	take_snapshot()                                  # 全局 snapshot = 这一刻（血量高、采集点 1 是满的）
+	var hp_at_anchor: float = enemies[0].hp
+	enemies[0].hp = 7.0                              # 打残（不死，仍留在名单里）
+	gathers[1].depleted = true
+	var ticket: Dictionary = _snapshot_dict()        # 票据 = 「残血 7 + 采集点 1 空」
+	enemies[0].hp = 3.0                              # 再补一刀：票据 ≠ 全局快照 ≠ 现状
+	gathers[1].depleted = false
+	restore_snapshot_from(ticket)
+	_check("按票据恢复：血量回到**票据**里的 7（不是全局快照的 %.1f）" % hp_at_anchor,
+			is_equal_approx(enemies[0].hp, 7.0),
+			"hp = %.1f（票据 7 / 全局 %.1f）" % [enemies[0].hp, hp_at_anchor])
+	_check("按票据恢复：采集点状态取**票据**里的值（空）", gathers[1].depleted, "被复原成满的")
+	restore_snapshot()                               # 收尾：回到锚点帧，不影响后面的用例
 
 	# ==================== M6 → M28：死亡 = 回到上次存档 ====================
 	# ⚠️ M28（用户定案）：**回溯功能暂时移除**，等后面重新设计。
