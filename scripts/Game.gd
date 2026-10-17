@@ -136,6 +136,12 @@ func _ready() -> void:
 	# ⭐ M31.3：前景遮挡开关（默认关）。放在自测分支**之前**，探针跑起来也能带上它。
 	if OS.get_cmdline_user_args().has("--foreground"):
 		_set_fg_occlusion(true)
+	# ⭐ M31.3：**世界图签名** —— 重烘焙后启动即报警（自测里还有断言兜底，见 `_check_world_sig`）。
+	_check_world_sig()
+	# ⭐ M31.3：`--worldsig` = 重建基线。**这是唯一的更新路径**，见 `_regen_world_sig()`。
+	if OS.get_cmdline_user_args().has("--worldsig"):
+		_regen_world_sig()
+		return
 
 	var want_selftest := OS.get_cmdline_user_args().has("--selftest")
 	if not want_selftest and FileAccess.file_exists("res://.godot/run_selftest"):
@@ -1448,6 +1454,40 @@ func _draw_swings() -> void:
 # ==================== 自测（M2）====================
 # 为什么值得写：编程 70% 的时间在找 bug，不是写新代码。
 # 有了它，你每次改完只要跑一条命令，就知道自己有没有弄坏东西。
+
+## ⭐ M31.3：**世界图签名比对**（启动时跑一次）。
+##    不是断言 —— 它只在**运行期**吼一声，让人在改图的第一时间就知道；
+##    真正的拦截交给自测里那三条 `world_sig` 断言（吼一声可以被忽略，红的测试不能）。
+func _check_world_sig() -> void:
+	var sig := GameData.world_sig()
+	var base := GameData.world_sig_baseline()
+	if base == "":
+		print("[world_sig] ⚠️ 没有基线文件 %s（当前 %s）—— 跑一次 `-- --worldsig` 建基线"
+				% [GameData.WORLD_SIG_PATH, sig])
+		return
+	if sig != base:
+		push_error("worldmap.png 和基线对不上：当前 %s / 基线 %s。"
+				% [sig, base]
+				+ " 若是**有意**重烘焙，请跑 `-- --worldsig` 更新基线（这是唯一路径）。")
+
+
+## ⭐ M31.3：**更新世界图基线的唯一路径**。
+##    跑法：`Godot --path . -- --worldsig`（或窗口模式同样加 `-- --worldsig`）。
+##    ⚠️ 这一步要**你自己跑、且确认过地形确实是你想要的** —— 它不是"让测试变绿"的按钮，
+##    它是一次显式的确认：我改了地图，下面三处联动我已经想过 ——
+##      ① `speed_mult_at()` 的高地减速阈值 ② 出生点 `e01` ③ 同心层 / 主城排布。
+func _regen_world_sig() -> void:
+	var sig := GameData.world_sig()
+	var f := FileAccess.open(GameData.WORLD_SIG_PATH, FileAccess.WRITE)
+	if f == null:
+		print("[world_sig] 写不了基线文件：", GameData.WORLD_SIG_PATH)
+		get_tree().quit(1)
+		return
+	f.store_string(sig)
+	f.close()
+	print("[world_sig] 基线已写入 %s = %s" % [GameData.WORLD_SIG_PATH, sig])
+	get_tree().quit(0)
+
 
 func _check(label: String, ok: bool, detail: String = "") -> void:
 	if ok:
@@ -4469,6 +4509,18 @@ func _run_selftest_body() -> void:
 			and is_equal_approx(float(GameData.WORLD_ROWS) * GameData.WORLD_CELL, GameData.WORLD["size"].y),
 			"%d×%.0f=%d vs %s" % [GameData.WORLD_COLS, GameData.WORLD_CELL,
 				int(GameData.WORLD_COLS * GameData.WORLD_CELL), str(GameData.WORLD["size"])])
+	## ⭐ M31.3：**世界图签名** —— 重烘焙的安全网。改 `worldmap.png` 会静默连带改
+	##    高地减速阈值 / 出生点 / 同心层排布，这三处都没有自己的检测 —— 只有签名能兜住。
+	##    ⚠️ 有意重烘焙后**必须**跑 `-- --worldsig` 更新基线，否则这条永远红（这是故意的）。
+	var wsig := GameData.world_sig()
+	var wsig_base := GameData.world_sig_baseline()
+	_check("世界图签名有基线（art/world/worldmap.sig）", wsig_base != "",
+			"基线文件缺失，跑 `-- --worldsig` 建一个")
+	_check("世界图**没被偷改**（签名与基线一致；重烘焙后要显式更新基线）",
+			wsig != "no-image" and wsig == wsig_base,
+			"当前 %s / 基线 %s" % [wsig, wsig_base])
+	_check("世界图签名是确定性的（连算两次一样，跨机器才可信）", GameData.world_sig() == wsig,
+			"两次算的不一样：%s vs %s" % [wsig, GameData.world_sig()])
 
 	## ⭐⭐ M31 Step 0：**所有内容点的坐标必须落在世界矩形内**。
 	##    起因：这次世界从 5120 宽收窄到 3584 宽 —— 若按字面把 wscl 固定成 (4,4) 烘焙，

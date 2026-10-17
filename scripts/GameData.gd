@@ -512,6 +512,52 @@ static func world_ready() -> bool:
 	var img := world_image()
 	return img != null and img.get_width() == WORLD_COLS and img.get_height() == WORLD_ROWS
 
+
+## ⭐ M31.3：**世界图签名**（`world_sig`）—— 重烘焙 `worldmap.png` 的**安全网**。
+##
+## 为什么必须先装它：改这张图会**静默**连带改三样东西，且三者都没有任何检测机制 ——
+##   ① `speed_mult_at()` 的 `elev >= 0.62` 高地减速 ×0.85（档位一变，移动手感暗中改）
+##   ② `gen_worldmap.mjs` 里写死 `e01 = 0.4` 的出生点（LEVELS 一改可能落到水里或崖上）
+##   ③ 同心层 / 主城的地块排布（山长在哪儿会变）
+## 签名把「意外改动」变成「必须显式确认的改动」：重烘焙后自测必红，逼人去更新基线。
+##
+## ⚠️ 两条设计纪律：
+##   ① **不用引擎的 `hash()`** —— 它的实现不保证跨版本 / 跨机器一致；签名必须可复现。
+##      这里自己写两个 32 位整数哈希（FNV-1a + SDBM），纯整数运算，到哪台机器都一样。
+##   ② 输入是**解码后的 RGBA8 像素**，不是文件字节 —— 换个编码器重导出、像素没变就不该报警。
+const WORLD_SIG_PATH := "res://art/world/worldmap.sig"
+
+
+static func _sig_fnv(b: PackedByteArray) -> int:
+	var h := 2166136261
+	for v in b:
+		h = ((h ^ v) * 16777619) & 0xFFFFFFFF
+	return h
+
+
+static func _sig_sdbm(b: PackedByteArray) -> int:
+	var h := 0
+	for v in b:
+		h = (v + (h << 6) + (h << 10) - h) & 0xFFFFFFFF
+	return h
+
+
+static func world_sig() -> String:
+	var img := world_image()
+	if img == null:
+		return "no-image"
+	var c: Image = img.duplicate()     # ⚠️ 显式标注：`duplicate()` 返回 Variant，不标会推不出类型
+	c.convert(Image.FORMAT_RGBA8)      # 统一字节布局，免得编码格式影响签名
+	var b: PackedByteArray = c.get_data()
+	return "w1-%d-%d-%dx%d" % [_sig_fnv(b), _sig_sdbm(b), c.get_width(), c.get_height()]
+
+
+## 基线（存在 `art/world/worldmap.sig`）。空串 = 还没建基线。
+static func world_sig_baseline() -> String:
+	if not FileAccess.file_exists(WORLD_SIG_PATH):
+		return ""
+	return FileAccess.get_file_as_string(WORLD_SIG_PATH).strip_edges()
+
 static func world_cell(cx: int, cy: int) -> Color:
 	var img := world_image()
 	if img == null or cx < 0 or cy < 0 or cx >= WORLD_COLS or cy >= WORLD_ROWS:
