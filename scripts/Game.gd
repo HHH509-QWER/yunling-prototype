@@ -18,6 +18,7 @@ const SaveGameScript := preload("res://scripts/SaveGame.gd")
 const SmithScript := preload("res://scripts/Smith.gd")
 const MerchantScript := preload("res://scripts/Merchant.gd")
 const TradeScript := preload("res://scripts/Trade.gd")
+const ForegroundLayerScript := preload("res://scripts/ForegroundLayer.gd")
 
 var player: Player = null
 var dummies: Array = []        # 场上所有假人（M1 的靶子，一直留着当验收基线）
@@ -57,6 +58,12 @@ var _hitstop_until_ms := 0
 var hud: Control = null           # 屏幕层 HUD（在场景里，由 _ready 接线）
 ## ⚠️ M28：RewindPanel 的变量与接线已移除（回溯暂停）。场景节点还留着，等重新设计时接回。
 var camera: Camera2D = null       # 跟着主角走的相机（在场景里，由 _ready 接线）
+## ⭐ M31.3：**前景遮挡开关**（默认关）。开法：命令行加 `-- --foreground`，或游戏里按 **F9**。
+##    打开后走进竹林能看见树冠盖住上半身 —— 斜 45° 视角下遮挡是自动产生的，
+##    先把开关递到用户手里看过再定价，不替他决定（M30.24 那条定案只是嫌那一版执行丑）。
+##    ⚠️ 默认关 = 场景树完全不变（节点懒建），对自测零影响。
+var fg_occlusion := false
+var fg_layer: Node2D = null       # 懒建：第一次打开时才挂上来
 var seal_panel: Control = null    # 命窍 / 炼化面板（在场景里，由 _ready 接线）
 var forge_panel: Control = null   # 合炼面板（在场景里，由 _ready 接线）
 var trade_panel: Control = null   # 交易面板（在场景里，由 _ready 接线）
@@ -115,6 +122,10 @@ func _ready() -> void:
 	# ⭐ 也认一个标记文件（res://.godot/run_selftest 内容为 1）：本机进程启动被沙箱拦下时，
 	#    仍然能由编辑器启动、用这个标记触发自测 —— 跑完把内容改成 0 即可。
 	#    放在 .godot/ 里是因为它被 gitignore（不进仓库），而且一定是可写的工作区路径。
+	# ⭐ M31.3：前景遮挡开关（默认关）。放在自测分支**之前**，探针跑起来也能带上它。
+	if OS.get_cmdline_user_args().has("--foreground"):
+		_set_fg_occlusion(true)
+
 	var want_selftest := OS.get_cmdline_user_args().has("--selftest")
 	if not want_selftest and FileAccess.file_exists("res://.godot/run_selftest"):
 		want_selftest = FileAccess.get_file_as_string("res://.godot/run_selftest").strip_edges() == "1"
@@ -1187,6 +1198,29 @@ func _input(event: InputEvent) -> void:
 	elif event.is_action_pressed("open_bag"):
 		toggle_bag_panel()
 		get_viewport().set_input_as_handled()
+	# ⭐ M31.3：F9 = 前景遮挡开关（默认关，见 `fg_occlusion`）。没走 InputMap，
+	#    就是为了不动 project.godot —— 这是个临时评估开关，不是正式操作。
+	elif event is InputEventKey and event.pressed and not event.echo \
+			and event.keycode == KEY_F9:
+		_set_fg_occlusion(not fg_occlusion)
+		print("[前景遮挡] %s（F9 切换）" % ("开" if fg_occlusion else "关"))
+		get_viewport().set_input_as_handled()
+
+
+## ⭐ M31.3：前景遮挡开关。节点**懒建 + 复用**：关着的时候场景树保持原样，
+##    ⚠️ `z_index = 64` 是关键 —— 玩家/敌人是 `Game` 的子节点（z=0），
+##    遮挡层必须比它们高才画在人**之后**（详见 `ForegroundLayer.gd` 的注释）。
+func _set_fg_occlusion(on: bool) -> void:
+	fg_occlusion = on
+	if on and fg_layer == null:
+		fg_layer = ForegroundLayerScript.new()
+		fg_layer.name = "FgLayer"
+		fg_layer.z_index = 64
+		fg_layer.game = self
+		add_child(fg_layer)
+	if fg_layer != null:
+		fg_layer.visible = on
+		fg_layer.queue_redraw()
 
 
 func toggle_forge_panel() -> void:
@@ -1228,6 +1262,9 @@ func _process(delta: float) -> void:
 	# 相机跟住主角（M7）。⭐ 必须放在最前面 —— 下面有个 hits 为空就短路 return
 	if camera != null and player != null and is_instance_valid(player):
 		camera.global_position = player.position
+	# ⭐ M31.3：前景遮挡层有风摆动画，得每帧重画（只在开着的时候）。
+	if fg_occlusion and fg_layer != null:
+		fg_layer.queue_redraw()
 
 	# 掉落物自动拾取 + 提示计时（M8）。⭐ 同样要在下面那个短路之前
 	_tick_pickups(delta)
@@ -1307,7 +1344,10 @@ func _draw() -> void:
 	# ⭐ M30.24（用户定案）：**那套"地面上撒竹子"不要了**（"太丑"）。
 	#    大世界的尺度感不靠地面装饰，靠**远处的层次**（山影 / 雾 / 空气透视）——
 	#    而那属于**背景层**（要画在 _draw 的最前面），不是这里。
-	#    `_draw_foreground()` 保留但不调用：以后做前景（屋檐/树冠遮挡）时它就位。
+	#    ⭐ M31.3：`_draw_foreground()` 现在**可开关**了（命令行 `-- --foreground` 或 F9，默认关）。
+	#    它不在这里调用 —— 原因不是"还没做"，而是**在这里调用遮不住人**：
+	#    `Game._draw()` 画在子节点之前，而玩家/敌人都是 `Game` 的子节点。
+	#    打开开关后由 z_index=64 的 `FgLayer` 子节点来画，才落在人之后。
 
 
 ## ⭐ M30.7：掌风弧光。一个**月牙**（外弧 + 内弧拼成的环形扇面）朝朝向扫出去 ——
@@ -1319,7 +1359,9 @@ func _draw() -> void:
 ##    ⚠️ 两条纪律：
 ##      ① 树冠位置**由格子决定**，绝不跟着玩家画 —— 跟着画就成了「头上顶个帽子」。
 ##      ② 只画玩家附近 3 格内的竹林，不刷满屏幕（性能 + 画面都不该被树冠淹掉）。
-func _draw_foreground() -> void:
+## ⚠️ 参数是**画在哪个 CanvasItem 上**：默认状态下本函数不被调用；
+##    打开开关后由 `FgLayer` 传自己进来（在 `Game._draw()` 里画 = 落在人身后，遮不住）。
+func _draw_foreground(target: CanvasItem) -> void:
 	if player == null or not is_instance_valid(player):
 		return
 	var pc := GameData.cell_of(player.position)
@@ -1345,15 +1387,15 @@ func _draw_foreground() -> void:
 				var sx := float(cx) * cell + cell * (0.26 + 0.24 * float(k)) + float((ah >> (k * 3)) % 5) - 2.0
 				var top := base_y - 25.0 - float((ah >> (k * 4 + 1)) % 9)
 				## 竹竿（深绿）+ 竹节（一节亮）
-				draw_line(Vector2(sx, base_y), Vector2(sx + sway * 0.6, top), Color(0.15, 0.25, 0.14, 0.95), 2.0)
-				draw_line(Vector2(sx + sway * 0.6, top + 11.0), Vector2(sx + sway * 0.6, top + 7.0),
+				target.draw_line(Vector2(sx, base_y), Vector2(sx + sway * 0.6, top), Color(0.15, 0.25, 0.14, 0.95), 2.0)
+				target.draw_line(Vector2(sx + sway * 0.6, top + 11.0), Vector2(sx + sway * 0.6, top + 7.0),
 						Color(0.30, 0.45, 0.24, 0.95), 2.0)
 				## 竹叶：三片斜细叶（羽状）
 				for m in range(3):
 					var lx := sx + sway * 0.9 + float(m - 1) * 5.0
 					var ly := top + float(m) * 3.0
 					var dir9 := -1.0 if m == 1 else 1.0
-					draw_line(Vector2(lx, ly), Vector2(lx + dir9 * 9.0, ly + 4.0), Color(0.23, 0.40, 0.21, 0.92), 1.5)
+					target.draw_line(Vector2(lx, ly), Vector2(lx + dir9 * 9.0, ly + 4.0), Color(0.23, 0.40, 0.21, 0.92), 1.5)
 
 
 func _draw_swings() -> void:
