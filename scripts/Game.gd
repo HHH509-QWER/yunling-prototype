@@ -131,18 +131,16 @@ func _build_world() -> void:
 	player.died.connect(_on_player_died)
 	add_child(player)
 
-	var wscl_d: Vector2 = GameData.WORLD["size"] / Vector2(1280.0, 720.0)
+	## ⭐ M31 Step 0：数据表里的坐标**已经是世界真坐标**（由 art/tools/once_bake_world_coords.py
+	##    一次性烘焙提交）—— 全工程只剩一套坐标，这里不再乘任何缩放系数。
 	for pos: Vector2 in GameData.DUMMY["spawns"]:
-		_spawn_dummy(pos * wscl_d)
+		_spawn_dummy(pos)
 
-	## ⭐ M30.25：世界放大到 4×4 屏。内容表里的坐标还是「旧世界」的，这里**统一乘一个系数** ——
-	##    一步把世界放大，不用手改几十个坐标（以后要精细编排再逐个改）。
-	var wscl: Vector2 = GameData.WORLD["size"] / Vector2(1280.0, 720.0)
 	for spec: Dictionary in GameData.ENEMY_SPAWNS:
-		_spawn_enemy(str(spec["archetype"]), (spec["pos"] as Vector2) * wscl, str(spec.get("carries", "")), bool(spec.get("elite", false)))
+		_spawn_enemy(str(spec["archetype"]), spec["pos"] as Vector2, str(spec.get("carries", "")), bool(spec.get("elite", false)))
 
 	for spot: Dictionary in GameData.GATHER["spots"]:
-		_spawn_gather((spot["pos"] as Vector2) * wscl, str(spot["item"]), int(spot["amount"]))
+		_spawn_gather(spot["pos"] as Vector2, str(spot["item"]), int(spot["amount"]))
 
 	# 货架 + 商人（M14）
 	merchant_stock.clear()
@@ -261,9 +259,9 @@ func _setup_lighting() -> void:
 		return                                  # 贴图没导入就只压暗，不点灯（不让它把游戏弄崩）
 	## 光的位置**跟着数据走**（商人 + 采集点），不是我瞎摆
 	var spots: Array = []
-	spots.append(GameData.MERCHANT["pos"] * (GameData.WORLD["size"] / Vector2(1280.0, 720.0)))
+	spots.append(GameData.MERCHANT["pos"])
 	for s in GameData.GATHER["spots"]:
-		spots.append((s["pos"] as Vector2) * (GameData.WORLD["size"] / Vector2(1280.0, 720.0)))
+		spots.append(s["pos"] as Vector2)
 	for i in range(mini(spots.size(), 6)):
 		var l := PointLight2D.new()
 		l.texture = tex
@@ -467,8 +465,8 @@ func _on_enemy_died(e) -> void:
 func _spawn_merchant() -> void:
 	merchant = MerchantScript.new()
 	merchant.name = "Merchant"
-	## ⭐ M30.25：商人坐标同样按世界缩放（放在世界中心附近的旧位置 ×4）
-	merchant.position = (GameData.MERCHANT["pos"] as Vector2) * (GameData.WORLD["size"] / Vector2(1280.0, 720.0))
+	## ⭐ M31 Step 0：坐标已是真坐标，不再乘世界缩放系数
+	merchant.position = GameData.MERCHANT["pos"] as Vector2
 	# ⚠️ 让商人**拿着同一个 Dictionary 引用** —— 之后所有读写都落在 merchant_stock 上，
 	#    快照恢复时才不用管「换没换过对象」。
 	merchant.stock = merchant_stock
