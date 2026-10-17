@@ -1444,6 +1444,16 @@ func _run_selftest() -> void:
 
 	_check("敌人按数据表生成 %d 个" % GameData.ENEMY_SPAWNS.size(),
 			enemies.size() == GameData.ENEMY_SPAWNS.size(), "实际 %d 个" % enemies.size())
+	# ⭐ M31 Step 0：稳定 id —— 将来存档从「数组下标」改成「稀疏 id 集合」的地基。
+	#    先守住两条不变量：每条都有非空 id，且 id 互不重复（重复 = 存档串位）。
+	var e_ids: Array = []
+	var e_id_bad := ""
+	for sp in GameData.ENEMY_SPAWNS:
+		var eid: String = str((sp as Dictionary).get("id", ""))
+		if eid == "" or e_ids.has(eid):
+			e_id_bad += (str(eid) if eid != "" else "<空>") + " "
+		e_ids.append(eid)
+	_check("每个敌人刷新点都有非空且不重复的 id", e_id_bad == "", "有问题：" + e_id_bad)
 
 	var foe = enemies[0]        # 猛兽
 	var brain = enemies[1]      # 智谋
@@ -1747,6 +1757,14 @@ func _run_selftest() -> void:
 
 	_check("采集点按数据表生成 %d 个" % GameData.GATHER["spots"].size(),
 			gathers.size() == GameData.GATHER["spots"].size(), "实际 %d 个" % gathers.size())
+	var g_ids: Array = []
+	var g_id_bad := ""
+	for spot in GameData.GATHER["spots"]:
+		var gid: String = str((spot as Dictionary).get("id", ""))
+		if gid == "" or g_ids.has(gid):
+			g_id_bad += (str(gid) if gid != "" else "<空>") + " "
+		g_ids.append(gid)
+	_check("每个采集点都有非空且不重复的 id", g_id_bad == "", "有问题：" + g_id_bad)
 
 	# 1. 走到采集点旁按 E
 	var gp = gathers[0]

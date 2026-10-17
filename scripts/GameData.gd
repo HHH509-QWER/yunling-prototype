@@ -709,15 +709,16 @@ const GATHER := {
 	##    （不做「positions 与 yields 两个数组顺序必须对齐」那种平行表 —— 一旦错位没人发现。）
 	## 产出规则：安全区（草原 / 岩区）给大宗基础材；危险区（雷区 / 热区）给**触媒**。
 	## 这就是「去哪采」的第一层风险回报。
+	## ⭐ M31 Step 0：`id`（g01…g08）= 稳定标识，用途同 ENEMY_SPAWNS 的 id（本轮只加字段）。
 	"spots": [
-		{"pos": Vector2(420.0, 469.3),   "item": "蕴灵草", "amount": 2},   # 草原
-		{"pos": Vector2(1260.0, 298.7),    "item": "蕴灵草", "amount": 2},   # 草原
-		{"pos": Vector2(2380.0, 426.7),   "item": "玄铁矿", "amount": 2},   # 岩区
-		{"pos": Vector2(3220.0, 1109.3),  "item": "玄铁矿", "amount": 2},   # 岩区
-		{"pos": Vector2(448.0, 2517.3),   "item": "雷纹石", "amount": 2},   # 雷区
-		{"pos": Vector2(1204.0, 2816.0),   "item": "雷髓",   "amount": 1},   # 雷区（触媒）
-		{"pos": Vector2(2464.0, 2645.3),   "item": "赤炎花", "amount": 2},   # 热区
-		{"pos": Vector2(3248.0, 2090.7),  "item": "地火芯", "amount": 1},   # 热区（触媒）
+		{"id": "g01", "pos": Vector2(420.0, 469.3),   "item": "蕴灵草", "amount": 2},   # 草原
+		{"id": "g02", "pos": Vector2(1260.0, 298.7),    "item": "蕴灵草", "amount": 2},   # 草原
+		{"id": "g03", "pos": Vector2(2380.0, 426.7),   "item": "玄铁矿", "amount": 2},   # 岩区
+		{"id": "g04", "pos": Vector2(3220.0, 1109.3),  "item": "玄铁矿", "amount": 2},   # 岩区
+		{"id": "g05", "pos": Vector2(448.0, 2517.3),   "item": "雷纹石", "amount": 2},   # 雷区
+		{"id": "g06", "pos": Vector2(1204.0, 2816.0),   "item": "雷髓",   "amount": 1},   # 雷区（触媒）
+		{"id": "g07", "pos": Vector2(2464.0, 2645.3),   "item": "赤炎花", "amount": 2},   # 热区
+		{"id": "g08", "pos": Vector2(3248.0, 2090.7),  "item": "地火芯", "amount": 1},   # 热区（触媒）
 	],
 }
 
@@ -958,24 +959,26 @@ const ENEMY := {
 ##    以前这里写的是「1280×720 设计空间」的坐标、运行时再乘 wscl —— 那套双重坐标系已删除。
 ##    ⚠️ 注意纵横比变了（16:9 → 7:6），所以各点之间的**距离不是等比缩放**，
 ##    但每个点落在世界里的**相对位置**（占世界的百分比）与改动前一致。
+## ⭐⭐ M31 Step 0：`id` = **稳定标识**（e01…e13）。它是为「存档从数组下标改成稀疏 id 集合」铺路 ——
+##    将来增删 / 重排刷新点，存档里已打死的敌人不会串位。**本轮只加字段，不动存档结构**。
 const ENEMY_SPAWNS := [
-	{"archetype": "猛兽", "pos": Vector2(700.0, 896.0)},       # 草原
-	{"archetype": "智谋", "pos": Vector2(2940.0, 640.0)},      # 岩区
-	{"archetype": "猛兽", "pos": Vector2(560.0, 2346.7)},       # 雷区
-	{"archetype": "智谋", "pos": Vector2(3080.0, 2560.0)},      # 热区
-	{"archetype": "猛兽", "pos": Vector2(1792.0, 384.0)},        # 北边路口
-	{"archetype": "智谋", "pos": Vector2(1792.0, 2773.3)},       # 南边路口
+	{"id": "e01", "archetype": "猛兽", "pos": Vector2(700.0, 896.0)},       # 草原
+	{"id": "e02", "archetype": "智谋", "pos": Vector2(2940.0, 640.0)},      # 岩区
+	{"id": "e03", "archetype": "猛兽", "pos": Vector2(560.0, 2346.7)},       # 雷区
+	{"id": "e04", "archetype": "智谋", "pos": Vector2(3080.0, 2560.0)},      # 热区
+	{"id": "e05", "archetype": "猛兽", "pos": Vector2(1792.0, 384.0)},        # 北边路口
+	{"id": "e06", "archetype": "智谋", "pos": Vector2(1792.0, 2773.3)},       # 南边路口
 	# ⭐ 三名灵师各带一枚印。雷区故意不放灵师 —— 留一个「只有材料、没有硬仗」的区。
-	{"archetype": "灵师", "pos": Vector2(868.0, 640.0), "carries": "流风印"},      # 草原
-	{"archetype": "灵师", "pos": Vector2(3052.0, 896.0), "carries": "辉光印"},     # 岩区
-	{"archetype": "灵师", "pos": Vector2(2772.0, 2261.3), "carries": "云雨印"},      # 热区
+	{"id": "e07", "archetype": "灵师", "pos": Vector2(868.0, 640.0), "carries": "流风印"},      # 草原
+	{"id": "e08", "archetype": "灵师", "pos": Vector2(3052.0, 896.0), "carries": "辉光印"},     # 岩区
+	{"id": "e09", "archetype": "灵师", "pos": Vector2(2772.0, 2261.3), "carries": "云雨印"},      # 热区
 	# ⚠️ 这只蛮兽原来在 (1600,620) —— 离商人 (1280,592) 只有 322px，正好在它的仇恨圈（330）里，
 	#    站在商人旁边交易会被它追着打。往东挪开，让「锚点 + 商人」这一带真的是安全区。
-	{"archetype": "蛮兽", "pos": Vector2(2660.0, 1664.0)},       # 中路偏右（真坐标，离商人 956px）
-	{"archetype": "蛮兽", "pos": Vector2(1372.0, 2560.0)},       # 雷区
+	{"id": "e10", "archetype": "蛮兽", "pos": Vector2(2660.0, 1664.0)},       # 中路偏右（真坐标，离商人 956px）
+	{"id": "e11", "archetype": "蛮兽", "pos": Vector2(1372.0, 2560.0)},       # 雷区
 	# ⭐ 精英都摆在**离锚点最远的两个角落** —— 越远越硬，这是最朴素的风险回报梯度
-	{"archetype": "智谋", "pos": Vector2(3388.0, 362.7), "carries": "惊雷印", "elite": true},     # 岩区深处
-	{"archetype": "蛮兽", "pos": Vector2(3360.0, 2816.0), "carries": "磐石印", "elite": true},    # 热区深处
+	{"id": "e12", "archetype": "智谋", "pos": Vector2(3388.0, 362.7), "carries": "惊雷印", "elite": true},     # 岩区深处
+	{"id": "e13", "archetype": "蛮兽", "pos": Vector2(3360.0, 2816.0), "carries": "磐石印", "elite": true},    # 热区深处
 ]
 
 
