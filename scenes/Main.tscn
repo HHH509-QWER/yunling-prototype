@@ -1,6 +1,69 @@
-[gd_scene load_steps=2 format=3 uid="uid://tf7jpdqbtpu7"]
+[gd_scene format=3 uid="uid://tf7jpdqbtpu7"]
 
 [ext_resource type="Script" uid="uid://cvcygj8llnfjn" path="res://scripts/Game.gd" id="1_game"]
+[ext_resource type="Script" uid="uid://ccljvv56lr1el" path="res://scripts/Hud.gd" id="2_rvslj"]
+[ext_resource type="Script" uid="uid://cfrh3a8equga0" path="res://scripts/RewindPanel.gd" id="3_0bbpv"]
+[ext_resource type="Script" uid="uid://dmg0p6j3r7pes" path="res://scripts/SealPanel.gd" id="4_rarhs"]
+[ext_resource type="Script" uid="uid://duqg1vrd6775k" path="res://scripts/ForgePanel.gd" id="5_vcsgt"]
+[ext_resource type="Script" uid="uid://dkhm1yjm1lyn8" path="res://scripts/TradePanel.gd" id="6_c01mt"]
 
-[node name="Game" type="Node2D"]
+[node name="Game" type="Node2D" unique_id=289543264]
 script = ExtResource("1_game")
+
+[node name="HudLayer" type="CanvasLayer" parent="." unique_id=23144970]
+
+[node name="Hud" type="Control" parent="HudLayer" unique_id=578147793]
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("2_rvslj")
+
+[node name="RewindPanel" type="Control" parent="HudLayer" unique_id=1876153771]
+visible = false
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("3_0bbpv")
+
+[node name="SealPanel" type="Control" parent="HudLayer" unique_id=1736999192]
+visible = false
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("4_rarhs")
+
+[node name="ForgePanel" type="Control" parent="HudLayer" unique_id=1813755505]
+visible = false
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+grow_horizontal = 2
+grow_vertical = 2
+script = ExtResource("5_vcsgt")
+
+[node name="TradePanel" type="Control" parent="HudLayer" unique_id=1173387073]
+visible = false
+layout_mode = 3
+anchors_preset = 15
+anchor_right = 1.0
+anchor_bottom = 1.0
+script = ExtResource("6_c01mt")
+
+[node name="Camera" type="Camera2D" parent="." unique_id=49764995]
+zoom = Vector2(2, 2)
+limit_left = 0
+limit_top = 0
+limit_right = 1280
+limit_bottom = 720
+position_smoothing_enabled = true
+position_smoothing_speed = 8.0

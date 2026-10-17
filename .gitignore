@@ -12,3 +12,10 @@ build/
 Thumbs.db
 desktop.ini
 .DS_Store
+
+# 原始素材投递目录（34M，不入版本库）
+art/incoming/
+
+# 工具临时目录
+pip-*/
+.workbuddy/
