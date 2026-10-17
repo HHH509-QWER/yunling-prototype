@@ -457,8 +457,10 @@ const SLOT_DAMAGED_TIME := 60.0
 #    所以屏幕上看到的范围与改动前**完全一样**（683×384 世界像素 = 1366×768 屏幕像素），
 #    但每个美术像素占 2×2 个屏幕像素 —— 像素颗粒粗一倍，空间关系不变。
 const WORLD := {
-	## ⭐ M30.25：世界 **4×4 屏**（5120×2880）—— 用户定案「想要大世界的样子」。
-	"size": Vector2(5120.0, 2880.0),
+	## ⭐ M31 Step 0：**世界容器 3584×3072**（= 112×96 格 × 32px）——《40 屏世界容器架构方案》定案。
+	##    ⚠️ 上一版是 5120×2880（160×90 格）：横向收窄 30%、纵向加高 6.7%，
+	##    纵横比从 16:9 变成 7:6。旧存档坐标按比例缩放后 clamp（见 SaveGame.VERSION 8）。
+	"size": Vector2(3584.0, 3072.0),
 }
 
 ## 视口与相机缩放（M29）。⭐ 这两个数字决定「1 个美术像素 = 几个屏幕像素」：
@@ -476,12 +478,12 @@ const CAMERA_ZOOM := 2.0
 ##    边界用正弦扰动做成**不规则过渡线**（不是四个直角方块）。
 ## ⚠️ 迁移中：`ZONES`（四分区）暂时**只用来给采集点/敌人打标签**，渲染已经不看它了。
 ##    下一步把采集点/敌人改成按距离分布 + 把 4 条分区断言换成地形断言，那时才删 `ZONES`。
-## ⭐⭐ M30.13c：**世界数据表**（由 `art/tools/gen_worldmap.mjs` 导出，40×23 格 × 32px）
+## ⭐⭐ M30.13c：**世界数据表**（由 `art/tools/gen_worldmap.mjs` 导出，112×96 格 × 32px）
 ##    R = 地形 id×50 / G = 海拔 / B = 水深 —— **渲染与玩法读同一张表**。
 ##    ⚠️ 绝不在 GDScript 里重算噪声：那会让「画出来的山」和「判定里的山」变成两座山。
 const WORLD_MAP_PATH := "res://art/world/worldmap.png"
-const WORLD_COLS := 160
-const WORLD_ROWS := 90
+const WORLD_COLS := 112
+const WORLD_ROWS := 96
 const WORLD_CELL := 32.0
 ## 地形 id → 名字。⚠️ 顺序必须和生成器里的 T 一致（水/草/林/山/灵田）
 const WORLD_TERRAINS := ["水泽", "草地", "竹林", "灵岩", "灵田"]
@@ -494,7 +496,7 @@ const ELEV_LIFT := 48.0
 static var _world_img: Image = null
 static var _world_tried := false
 
-## 读一次就缓存（40×23 很小；**不要每帧读**）
+## 读一次就缓存（112×96 很小；**不要每帧读**）
 static func world_image() -> Image:
 	if not _world_tried:
 		_world_tried = true
@@ -585,16 +587,24 @@ const WORLD_TERRAIN_COLORS := {
 }
 
 
-const ZONES := {
-	"草原": {"rect": Rect2(0.0, 0.0, 2560.0, 1440.0), "color": Color(0.11, 0.14, 0.11),
-		"visual": {"texture": "res://art/tiles/grass.png"}},
-	"岩区": {"rect": Rect2(2560.0, 0.0, 2560.0, 1440.0), "color": Color(0.14, 0.13, 0.12),
-		"visual": {"texture": "res://art/tiles/rock.png"}},
-	"雷区": {"rect": Rect2(0.0, 1440.0, 2560.0, 1440.0), "color": Color(0.10, 0.10, 0.16),
-		"visual": {"texture": "res://art/tiles/thunder.png"}},
-	"热区": {"rect": Rect2(2560.0, 1440.0, 2560.0, 1440.0), "color": Color(0.16, 0.10, 0.09),
-		"visual": {"texture": "res://art/tiles/heat.png"}},
-}
+## ⭐ M31 Step 0：四个区的矩形**从世界尺寸算**，不再写死。
+##    ⚠️ 以前写死 2560×1440（= 旧世界 5120×2880 的一半）—— 世界一改尺寸，
+##    「四个分区正好铺满世界」和「每区 2 处采集点」两条断言立刻假失败。
+##    现在世界改多大，分区就跟着铺多大（**分区只是标签**：渲染与产出都不看它）。
+static var ZONES: Dictionary = _build_zones()
+
+static func _build_zones() -> Dictionary:
+	var h: Vector2 = WORLD["size"] * 0.5          # 切分点 = 世界正中（四象限）
+	return {
+		"草原": {"rect": Rect2(0.0, 0.0, h.x, h.y), "color": Color(0.11, 0.14, 0.11),
+			"visual": {"texture": "res://art/tiles/grass.png"}},
+		"岩区": {"rect": Rect2(h.x, 0.0, h.x, h.y), "color": Color(0.14, 0.13, 0.12),
+			"visual": {"texture": "res://art/tiles/rock.png"}},
+		"雷区": {"rect": Rect2(0.0, h.y, h.x, h.y), "color": Color(0.10, 0.10, 0.16),
+			"visual": {"texture": "res://art/tiles/thunder.png"}},
+		"热区": {"rect": Rect2(h.x, h.y, h.x, h.y), "color": Color(0.16, 0.10, 0.09),
+			"visual": {"texture": "res://art/tiles/heat.png"}},
+	}
 
 ## 某个世界坐标落在哪个区。采集产出与敌人配置都靠它，避免在数据里重复写区名。
 static func zone_at(pos: Vector2) -> String:

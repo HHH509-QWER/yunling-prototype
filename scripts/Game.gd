@@ -4200,8 +4200,15 @@ func _run_selftest() -> void:
 			"有 %d 枚印显化着" % player.slot_summoned.filter(func(x): return x != null).size())
 
 	# ⭐ M30.13c：世界数据（高度模型）—— 渲染与玩法读同一张表
-	_check("世界数据已加载且尺寸是 40×23（每格 32px）", GameData.world_ready(),
-			"读取失败：%s" % GameData.WORLD_MAP_PATH)
+	## ⭐ M31 Step 0：尺寸**从数据算**（以前写死「40×23」，M30.25 放大世界后就一直是错的）
+	_check("世界数据已加载且尺寸是 %d×%d（每格 %.0fpx）" % [
+				GameData.WORLD_COLS, GameData.WORLD_ROWS, GameData.WORLD_CELL],
+			GameData.world_ready(), "读取失败：%s" % GameData.WORLD_MAP_PATH)
+	_check("世界格数 × 每格像素 == 世界尺寸（格表与世界容器自洽）",
+			is_equal_approx(float(GameData.WORLD_COLS) * GameData.WORLD_CELL, GameData.WORLD["size"].x)
+			and is_equal_approx(float(GameData.WORLD_ROWS) * GameData.WORLD_CELL, GameData.WORLD["size"].y),
+			"%d×%.0f=%d vs %s" % [GameData.WORLD_COLS, GameData.WORLD_CELL,
+				int(GameData.WORLD_COLS * GameData.WORLD_CELL), str(GameData.WORLD["size"])])
 	var cliff_cnt := 0
 	var deep_cnt := 0
 	var elev_min := 1.0

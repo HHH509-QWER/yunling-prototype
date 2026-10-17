@@ -14,7 +14,7 @@ import zlib from "node:zlib";
 import { fileURLToPath } from "node:url";
 
 const CELL = 8;                       // 布局格子（预览用 8px；真地块集用 32px，比例一致）
-const COLS = 640, ROWS = 360;         // ⭐ M30.25：×4 → 640×8 = 5120, 360×8 = 2880（4×4 屏的大世界）
+const COLS = 448, ROWS = 384;         // ⭐ M31 Step 0：448×8 = 3584, 384×8 = 3072（世界容器 3584×3072）
 const here = path.dirname(fileURLToPath(import.meta.url));
 
 const mk = () => new Uint8Array(COLS * CELL * ROWS * CELL * 4);
@@ -143,10 +143,11 @@ export function generate(log = console.log) {
   for (let y = 0; y < H; y++) { raw[y * (W * 4 + 1)] = 0; Buffer.from(b.buffer, y * W * 4, W * 4).copy(raw, y * (W * 4 + 1) + 1); }
   const ihdr = Buffer.alloc(13); ihdr.writeUInt32BE(W, 0); ihdr.writeUInt32BE(H, 4); ihdr[8] = 8; ihdr[9] = 6;
   fs.writeFileSync(out, Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk("IHDR", ihdr), chunk("IDAT", zlib.deflateSync(raw, { level: 9 })), chunk("IEND", new Uint8Array(0))]));
-  // ⭐⭐ 导出游戏用的世界数据：**40×23 格（每格 32px）**
-  //    R = 地形 id ×50 / G = 海拔 / B = 水深 —— 一张 40×23 的小 PNG，
+  // ⭐⭐ 导出游戏用的世界数据：**112×96 格（每格 32px）**
+  //    R = 地形 id ×50 / G = 海拔 / B = 水深 —— 一张 112×96 的小 PNG，
   //    渲染与玩法都读它（**同一个真相**，绝不在 GDScript 里重算噪声）。
-  const CW = 160, CH = 90, K = COLS / CW;   // 1280/32 = 40, 720/32 = 22.5 → 取 23 行（最后一行半格）
+  //    ⚠️ 112×32 = 3584、96×32 = 3072 —— 必须与 GameData.WORLD["size"] 完全一致。
+  const CW = 112, CH = 96, K = COLS / CW;   // K = 448/112 = 4（1 个 32px 格 = 4×4 个 8px 布局格）
   const wb = Buffer.alloc(CW * CH * 4);
   const wdir = path.resolve(here, "..", "world");
   fs.mkdirSync(wdir, { recursive: true });
