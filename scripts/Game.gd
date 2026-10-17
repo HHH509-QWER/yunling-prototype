@@ -87,8 +87,14 @@ func _ready() -> void:
 	camera.limit_right = int(GameData.WORLD["size"].x)
 	camera.limit_bottom = int(GameData.WORLD["size"].y)
 	_setup_lighting()
-	# ⚠️ M30.29 后处理**暂时关闭**：开启后游戏启动即崩（连日志都没写 → 疑似 Compatibility 下
-	#    屏幕纹理/CanvasLayer 组合的渲染问题）。代码保留，下一批用最小复现单独验证。
+	# ⭐ M30.29 后处理（泛光 + 色彩分级 + 暗角）—— **是开着的**，画面「电影感」的来源。
+	#    ⚠️ 这里原来写着「暂时关闭：开启后游戏启动即崩」—— **那条注释是过期的**（M31 实测推翻）：
+	#       ① headless 与窗口模式跑 `--selftest` 都不崩；
+	#       ② 工程自带的 `tests/fx_probe.tscn` 探针实测
+	#          `FXPROBE screen ... diff=0.000 VERDICT=PASS` —— 它验的正是这里用的
+	#          「屏幕纹理采样 shader」，在 `gl_compatibility` 下支持良好。
+	#       真实状态一直是「开着且没崩」，只是注释没跟着改，把后来人吓住了。
+	#    ⚠️ 教训（架构要求）：**凡能变成断言的要求一律升级成断言** —— 注释会与代码脱节，断言不会。
 	_setup_post_fx()
 	seal_panel = $HudLayer/SealPanel
 	seal_panel.closed.connect(_on_seal_panel_closed)
