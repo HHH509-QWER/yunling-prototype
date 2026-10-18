@@ -1311,14 +1311,20 @@ func _process(delta: float) -> void:
 	_tick_activation()      # ⭐ M30.26：远处的实体休眠（大世界真正该先做的那件事）
 
 	# 短命伤害区：寿命到了就丢掉，不然会一直堆在内存里
-	if hits.is_empty():
-		return
-	var keep: Array = []
-	for h in hits:
-		h["t"] = float(h["t"]) + delta
-		if float(h["t"]) < float(h["life"]):
-			keep.append(h)
-	hits = keep
+	if not hits.is_empty():
+		var keep: Array = []
+		for h in hits:
+			h["t"] = float(h["t"]) + delta
+			if float(h["t"]) < float(h["life"]):
+				keep.append(h)
+		hits = keep
+	# ⭐ M31.3（重烘焙收尾时抓帧抓出来的真 bug）：queue_redraw 必须**每帧**调。
+	#    原来它被塞在 `if hits.is_empty(): return` 的后面 —— 不打架就整帧不重画，
+	#    `_draw()` 的绘制命令被引擎缓存复用，而 `_draw_world_height()` 里的 vis_r
+	#    裁剪又是按「_draw 那一刻的玩家位置」算的 ⇒ 玩家走远后，屏幕上只有
+	#    「上次打架时那一圈」的格子，其余全是黑（clear color 15,18,20）。
+	#    之前观察到的"黑带/黑缝"全是它，不是几何、不是 padding、更不是 LIFT 太大。
+	#    _draw 本身很便宜（vis_r 已裁剪，实测算下来一屏 575 格），放最后一行没负担。
 	queue_redraw()
 
 
@@ -1365,7 +1371,12 @@ func _draw() -> void:
 			draw_string(font, at, str(n["text"]), HORIZONTAL_ALIGNMENT_CENTER, 60.0, 15,
 					Color(n["color"], fade))
 
-	# ⭐ M30.27：**云带**（前景薄雾）—— 画在实体之后，才有"雾在人和地之间"的层次。
+	# ⭐ M30.27：**云带**（前景薄雾）—— 画在地形之后，才有"雾在人和地之间"的层次。
+	#    ⚠️ M31.3 更正措辞（行为不变、云不挪）：原文「画在实体之后」是**错的** —— Godot 的
+	#       CanvasItem 顺序是**父节点的 `_draw()` 画在子节点之前**，而玩家/敌人全是 `Game`
+	#       的子节点（详见 `ForegroundLayer.gd` 头注释），所以这里的云实际落在**实体之下**。
+	#       定案原文说的是「在**人和地**之间」= 地形 < 云 < 人 —— 现状正好命中，别再挪。
+	#       想让云盖到人，该挂 `FgLayer`（`_set_fg_occlusion`，z_index=64），不是改这一行。
 	_draw_clouds()
 	# ⭐ M31.3：**远山剪影** —— 画在云之后（山比云远）。俯视角没有地平线，
 	#    必须压在地形之上，落在屏幕顶部那条带上才读得出"北边很远的地方有山"。
