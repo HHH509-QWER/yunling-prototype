@@ -72,23 +72,19 @@ var camera: Camera2D = null       # 跟着主角走的相机（在场景里，�
 ##    ⚠️ 默认关 = 场景树完全不变（节点懒建），对自测零影响。
 var fg_occlusion := false
 var fg_layer: Node2D = null       # 懒建：第一次打开时才挂上来
-## ⭐ M31.3：**南向裙边**开关（F11，默认关）。
-##    每格只画顶面 ⇒ 北邻比自己高时，两格之间露出一条**底色竖条**，
-##    缝高 = Δe×ELEV_LIFT（实测 h21×w64 = 一级台阶 × 一格宽 @zoom2）。
-##    裙边 = 把自己（低格）的顶面**同色同纹理向上延伸** Δ 顶到北邻底边 ——
-##    ⚠️ 不是"画一面崖壁墙"：M30.13e 用户否决的正是"灰墙看着像地图上乱摆的障碍"。
-##    ⇒ 不许描边 / 阴影 / 渐变，那些会让它读成独立物件而不是地形本身的延续。
-##    ⚠️ 与 F9/F10 同一个规矩：**默认关，把待验证假设变成点一下**，让用户自己定价。
-## ⚠️⚠️ **只填 ≤ 一格高的缝**（`SKIRT_MAX = 32`）。更大的缝**不许在渲染层糊**：
-##    一条 122 世界单位（2.5 个身高）的同色竖条 = 一面地色的墙，而 `can_step()` 对高差放行
-##    ⇒ 正是 `GameData.ELEV_LIFT` 注释里写死的那句「画面看着是墙、人却能走上去，用户否决过」。
-##    ⭐ M31.3 拍板（team-lead）：限高选 **32（一格高）** 而不是 10（一级台阶），理由 ——
-##      ① 一格 = 一个地形单元，补出来的竖条最多占一格，读起来是"地形这一格比较厚"，
-##         不会读作独立物件；② 实测限高 10 时三帧各留 2/0/1 块特征块，限高 32 全归零；
-##      ③ 台阶是修仙题材的正资产，10 会把正常的二级台阶（Δe=0.10 → 20 单位）也啃掉一半。
-##    大缝是**数据层**的问题（见 `_check_world_terrain()` 末尾那条预警），回去查烘焙，别在渲染层盖。
-const SKIRT_MAX := 32.5    # 一格高 = WORLD_CELL 32，留 0.5 浮点余量
-var skirt := false
+## ⚠️⚠️ **已删除（用户拍板「地图做成平面」，`ELEV_LIFT` 归零）**：南向裙边整套 ——
+##    开关 `skirt`（F11 / `--skirt`）、限高 `SKIRT_MAX`、`_draw_world_height()` 里的裙边绘制分支、
+##    覆盖率工具 `_gap_ratio_at()` / `_gap_mark()` / `GAP_GRID`、以及 `_check_world_terrain()`
+##    里 7 条高度相关断言（量化级差 × LIFT / 崖占比 / 向南下降洞高 / 出生点平坝零暗缝 /
+##    裙边覆盖率×2 / 陆-陆大缝条数）。
+##    理由：裙边**只为「向南下降产生的暗缝」存在**，平面后它没有对象可处理；整组留下只会
+##    变成空绿（`lift=0` ⇒ 缝高恒 0 ⇒ 每条都过）或假红（`gap_on < gap_off - 1.0` 在两边都
+##    是 0 时是 `0 < -1`）—— 两种都比没有更危险。
+##    ⚠️ **恢复代价已知且已被用户接受**：`git revert` 救不回来（这个文件别人还在提交，
+##    revert 会捎上别人的改动），将来想恢复立体要重写。别悄悄把它加回来。
+## ⭐ 保留的只有 `_check_world_terrain()` 里**与高度无关**的两条（水面占比 / 泥沼占比），
+##    它们守的是地形分布「水面悄悄没了 / 新增地形被烘没了」，平面化不影响，见
+##    `_check_world_composition()`。
 ## ⭐ M31.3：**素色直出**（命令行 `--flat`，抓帧测量专用）。
 ##    抓帧默认画面叠着 CanvasModulate 压暗 + 后处理分级 ⇒ 暗地形和
 ##    clear color 只差几个灰阶，像素统计根本分不开（前两轮"把暗紫块当地形"的眼误就是这么来的）。
@@ -168,9 +164,6 @@ func _ready() -> void:
 	# ⭐ M31.3：前景遮挡开关（默认关）。放在自测分支**之前**，探针跑起来也能带上它。
 	if OS.get_cmdline_user_args().has("--foreground"):
 		_set_fg_occlusion(true)
-	# ⭐ M31.3：南向裙边开关（`--skirt`），与前景遮挡同一套：默认关，抓帧对照时显式开。
-	if OS.get_cmdline_user_args().has("--skirt"):
-		skirt = true
 	# ⭐ M31.3：素色直出（`--flat`，抓帧测量专用，见 `debug_flat` 注释）。
 	if OS.get_cmdline_user_args().has("--flat"):
 		debug_flat = true
@@ -475,27 +468,6 @@ func _draw_world_height() -> void:
 			else:
 				draw_rect(r, GameData.WORLD_TERRAIN_COLORS.get(tn, Color(0.16, 0.20, 0.16)))
 			_blend_seams(r, tn, cx, cy)
-		## ⭐ M31.3：**南向裙边**（F11）—— 把自己（低格）的顶面**向上延伸** Δ 顶到北邻底边。
-		##    Δ = (e_北 − e_自己) × ELEV_LIFT，正好等于那条露出底色的缝高；
-		##    ⚠️ 用**自己的**颜色/纹理（不是灰色墙面），且不加描边/阴影/渐变 ——
-		##       M30.13e 否决的是"看着像障碍的墙"，裙边必须读作地形本身的延续。
-		if skirt and GameData.in_map(Vector2i(cx, cy - 1)):
-			var d9 := (GameData.cell_elev(cx, cy - 1) - e) * GameData.ELEV_LIFT
-			## ⚠️ 限高：只补 ≤ 一格（32）的缝。超过的**故意不画** —— 那是数据层的异常落差，
-			##    在这儿补出来就是一面能穿过去的墙（见 `SKIRT_MAX` 的注释）。
-			if d9 > 0.01 and d9 <= SKIRT_MAX:
-				var sr := Rect2(Vector2(at.x, at.y - d9), Vector2(cell, d9))
-				if tn == "水泽":
-					draw_rect(sr, Color(0.12, 0.26, 0.40).lerp(
-							Color(0.04, 0.11, 0.22), GameData.cell_depth(cx, cy)))
-				elif tex != null:
-					var ts := tex.get_size()
-					# 只取贴图的**顶部**对应的那一段（缝比一格高时取整张拉伸），避免压扁感
-					draw_texture_rect_region(tex, sr,
-							Rect2(Vector2.ZERO, Vector2(ts.x, ts.y * minf(1.0, d9 / cell))),
-							_world_tint_of(tn))
-				else:
-					draw_rect(sr, GameData.WORLD_TERRAIN_COLORS.get(tn, Color(0.16, 0.20, 0.16)))
 		# ⭐ M30.13e（用户定案）：**不再画崖壁竖面** —— 那些灰墙看着像地图上乱摆的障碍。
 		#    高度还在（每格按海拔偏移 + 低的先画高的后画 = 遮挡），只是不画"墙"了。
 
@@ -1214,12 +1186,6 @@ func _input(event: InputEvent) -> void:
 		_set_fg_occlusion(not fg_occlusion)
 		print("[前景遮挡] %s（F9 切换）" % ("开" if fg_occlusion else "关"))
 		get_viewport().set_input_as_handled()
-	# ⭐ M31.3：F11 = 南向裙边开关（默认关，见 `skirt`）。同上，不动 project.godot。
-	elif event is InputEventKey and event.pressed and not event.echo \
-			and event.keycode == KEY_F11:
-		skirt = not skirt
-		print("[南向裙边] %s（F11 切换）" % ("开" if skirt else "关"))
-		get_viewport().set_input_as_handled()
 
 
 ## ⭐ M31.3：前景遮挡开关。节点**懒建 + 复用**：关着的时候场景树保持原样，
@@ -1487,35 +1453,20 @@ func _regen_world_sig() -> void:
 	get_tree().quit(0)
 
 
-## ⭐⭐ M31.3 收尾：**地形参数的三条防线**（烘焙参数的回归测试）。
-##    起因：这一轮烘焙学会了两件事 —— ① 动 `LEVELS` / `ELEV_LIFT` 会**同时**改掉崖的判定、
-##    移动手感和画面观感，而三者原本都没有任何检测；② 上一轮全靠人眼看图才发现问题。
-##    这三条把「靠人记」变成「改坏就红」。
-##
-## ⚠️ 三条各自守什么，别合并（合并了就不知道红在哪）：
-##   A **量化级差**：用 **最小非零** 相邻高差（= 量化步长 1/(LEVELS-1)），不是最大值。
-##     全图 max 是 120 世界单位，那是水陆边界 / 出生点平台的**有意崖**，拿它当 bug 就永远红。
-##     守的是「LEVELS 变粗或 LIFT 变大 → **所有台缘都成崖** → 画面看着是墙人却能走上去」。
-##   B **洞高**：`max(向南下降) × LIFT ≤ 半屏高`。守黑带。判据推导见 `GameData.ELEV_LIFT` 注释。
-##   C **水面 / 泥沼占比**：守「水面悄悄没了」和「新增地形被烘没了」。
-func _check_world_terrain() -> void:
+## ⭐⭐ **地形构成**防线（烘焙参数的回归测试）—— 只守**与高度无关**的那部分。
+##    ⚠️ 原 `_check_world_terrain()` 已随「地图做成平面（`ELEV_LIFT` 归零）」整套删除，
+##       删除清单与理由见文件头那条记录（用户已知恢复代价：`git revert` 救不回来）。
+##       它那 9 条里 7 条是**高度产物**：量化级差×LIFT / 崖占比 / 向南下降洞高 /
+##       出生点平坝零暗缝 / 裙边覆盖率×2 / 陆-陆大缝条数 ——
+##       归零后要么空绿（缝高恒 0，条条都过）、要么假红（`gap_on < gap_off - 1.0`
+##       在两边都是 0 时是 `0 < -1`），两种都比没有更危险。
+##    ⭐ 下面两条**不是**高度产物，守的是地形**分布**，平面化不动 `worldmap.png`
+##       ⇒ 它们仍然有效、仍然会红，所以留着：
+##         · 水面占比 8~12% —— 守「水面悄悄没了」（重烘焙最容易无声丢掉的地形）
+##         · 泥沼存在且不过量 —— 守「新增地形被烘没了」
+func _check_world_composition() -> void:
 	if not GameData.world_ready():
 		return
-	var lift := GameData.ELEV_LIFT
-	var cliff_w := GameData.CLIFF_STEP * lift            # 崖的世界单位上限（12）
-	# 半屏高度换算成**世界单位**：视口像素 ÷ zoom ÷ 2。⚠️ 别写死 192（改 zoom 就错）
-	# ⚠️⚠️ **不能用 `get_viewport_rect()`**：headless 下窗口是**方的**（实测 (1366,1366)），
-	#    算出来是 341.5 而不是 192 —— 这条防线在 CI（headless）里就形同虚设，等于没写。
-	#    改用工程里配的视口高度，headless 与窗口模式都是 768 → 半屏 192。
-	var vh := float(ProjectSettings.get_setting("display/window/size/viewport_height", 768))
-	var z9 := GameData.CAMERA_ZOOM
-	if is_instance_valid(camera):
-		z9 = maxf(camera.zoom.y, 0.01)
-	var half_h := vh * 0.5 / z9
-	var step := 1.0          # 最小非零相邻高差 = 量化步长
-	var cliff_n := 0
-	var pair_n := 0
-	var max_drop := 0.0      # 最大「向南下降」× LIFT = 最大洞高（世界单位）
 	var water := 0
 	var marsh := 0
 	for cy in range(GameData.WORLD_ROWS):
@@ -1525,179 +1476,15 @@ func _check_world_terrain() -> void:
 				water += 1
 			elif tn == "泥沼":
 				marsh += 1
-			var e := GameData.cell_elev(cx, cy)
-			for k in range(2):
-				var nx2: int = cx + (1 if k == 0 else 0)
-				var ny2: int = cy + (0 if k == 0 else 1)
-				if not GameData.in_map(Vector2i(nx2, ny2)):
-					continue
-				var ad := absf(GameData.cell_elev(nx2, ny2) - e)
-				pair_n += 1
-				if ad > 1e-6 and ad < step:
-					step = ad
-				if ad > GameData.CLIFF_STEP:
-					cliff_n += 1
-			if GameData.in_map(Vector2i(cx, cy + 1)):
-				max_drop = maxf(max_drop, (e - GameData.cell_elev(cx, cy + 1)) * lift)
 	var total := GameData.WORLD_COLS * GameData.WORLD_ROWS
-	var cliff_pct := 100.0 * float(cliff_n) / float(maxi(pair_n, 1))
 	var water_pct := 100.0 * float(water) / float(total)
 	var marsh_pct := 100.0 * float(marsh) / float(total)
-	## ⭐ M31.3 收尾复核：**那条"黑带"守的是 bug，不是几何**（queue_redraw 被短路，fbe4fab 已修）。
-	##    下面三条按"它到底守得住什么"重新定性，守不住的一律改名或删掉 ——
-	##    留一条永远绿、又挡不住任何东西的断言，等于养一条看起来在工作的防线。
-	_check("量化级差 × LIFT ≤ 崖阈值（守「每级台缘的暗缝宽度」）", step * lift <= cliff_w + 0.001,
-			"%.2f 世界单位 > %.2f（量化步长 %.4f = 1/20；崖壁不画，所以这一级差 = 每级台缘暗缝的高度）"
-			% [step * lift, cliff_w, step])
-	_check("全图崖占比 ≤ 10%（守「暗缝密度」）", cliff_pct <= 10.0,
-			"%.1f%%（%d/%d 组相邻关系是崖 → 就有多少条暗缝）" % [cliff_pct, cliff_n, pair_n])
-	## ⚠️ 这条**只挡灾难性回归**（LIFT 翻倍 / 落差暴增才会红），不挡观感：
-	##    暗缝的观感门槛是一格高 32（`ELEV_LIFT < 53`），当前 120 世界单位**并不达标**，
-	##    那是已知代价，正解是补南向裙边（见 `GameData.ELEV_LIFT` 注释），不是压落差。
-	##    别把这条阈值当成"合格线"去调 —— 它只是"别再坏下去"的绊线。
-	_check("最大「向南下降」暗缝高度 ≤ 半屏高（绊线：只挡灾难性回归，不挡观感）",
-			max_drop <= half_h + 0.001,
-			"暗缝 %.0f > 半屏 %.0f（缝高 = Δe×LIFT，只在向南下降处出现；观感门槛是 32，当前不达标）"
-			% [max_drop, half_h])
-	## ⭐ 新增（替代被删掉的「LIFT ≤ 半屏×1.25」那条 —— 它守的"黑带"已被证伪，纯装饰，删）：
-	##    出生点平坝（±16 格）内海拔被烘焙成同一档 ⇒ **必须零向南级差 ⇒ 零暗缝**。
-	##    这条守的是"主城/出生区画面干净"，一旦重烘焙把平坝打散（LEVELS 或清场半径改了）立刻红。
-	var spawn_drop := 0.0
-	var cc := Vector2i(GameData.WORLD_COLS / 2, GameData.WORLD_ROWS / 2)
-	for cy in range(cc.y - 16, cc.y + 16):
-		for cx in range(cc.x - 16, cc.x + 16):
-			if not GameData.in_map(Vector2i(cx, cy + 1)):
-				continue
-			spawn_drop = maxf(spawn_drop,
-					(GameData.cell_elev(cx, cy) - GameData.cell_elev(cx, cy + 1)) * lift)
-	_check("出生点平坝（±16 格）内零暗缝（守「主城/出生区画面干净」）", spawn_drop <= 0.001,
-			"平坝内最大向南级差 %.2f 世界单位（平坝必须同档；LEVELS 或清场半径改了必红）"
-			% spawn_drop)
 	_check("水面占比 8~12%（烘焙参数的直接产物，守「水面悄悄没了」）",
 			water_pct >= 8.0 and water_pct <= 12.0,
 			"%.1f%%（%d/%d 格）" % [water_pct, water, total])
 	_check("泥沼存在且不过量（M31.3 新增地形，守「被烘没了」）",
 			marsh > 0 and marsh_pct < 10.0,
 			"%.2f%%（%d 格）" % [marsh_pct, marsh])
-	## ⭐ M31.3：**全屏暗缝覆盖率**（四个取景点：出生点 + 上轮抓帧的 drop/shore/slope）
-	##    ⚠️ 校准依据：修复前像素实测 drop 24.2% / shore 10.5% / slope 3.7%。
-	##    ① 裙边**开**时应≈0 —— 这条守的是"裙边逻辑以后被改坏"（改坏立刻红）。
-	##    ② 裙边**关**时是当前默认观感，只作绊线（≤30%，防止哪天突然翻倍）。
-	var gap_on := 0.0
-	var gap_off := 0.0
-	for pt in [Vector2(1792.0, 1536.0), Vector2(1264.0, 368.0),
-			Vector2(2672.0, 656.0), Vector2(2256.0, 2320.0)]:
-		gap_on = maxf(gap_on, _gap_ratio_at(pt, true))
-		gap_off = maxf(gap_off, _gap_ratio_at(pt, false))
-	## ⚠️ 数字**无条件打印**（自测里 pass 不打印 detail，但这是给 team-lead 的对照数字，
-	##    必须每次都能抄到，不能只在红了才看得见）。
-	print("[暗缝覆盖] 四取景点最大值：裙边关 %.1f%% → 裙边开 %.1f%%（限高 %.0f 世界单位）"
-			% [gap_off, gap_on, SKIRT_MAX])
-	## ⚠️ 阈值按「裙边只填 ≤ 一格（32）」之后的新现实重标：开裙边**不会归零**（大缝故意不填），
-	##    守的是"小缝被填掉"这件事本身 ⇒ 用"开了必须比关了明显少"作判据（留 1 个点余量）。
-	_check("裙边开启后暗缝覆盖率必须下降（守「裙边逻辑被改坏 / 被限死」）", gap_on < gap_off - 1.0,
-			"关 %.1f%% → 开 %.1f%%（只填 ≤%.1f 的缝，大缝故意留着；算法见 `_gap_ratio_at`）"
-			% [gap_off, gap_on, SKIRT_MAX])
-	_check("裙边关闭时暗缝覆盖率 ≤ 30%（绊线：记录默认观感，只挡突然恶化）", gap_off <= 30.0,
-			"%.1f 个百分点（裙边默认关，这是当前默认观感的已知值）" % gap_off)
-	## ⭐ 判据（team-lead 拍板，取代"未覆盖率%"）：**单条最大缝高 ≤ 一格高(32)，且不存在 >32 的缝**。
-	##    ⚠️ 分两类报：水陆交界的深水岸（走不下去，不是"能穿过去的墙"）与陆-陆可通行缝（是真问题）。
-	var seam_land := 0.0        # 陆-陆（可通行）最大缝高
-	var seam_water := 0.0       # 至少一侧是水的最大缝高
-	var seam_land_n := 0
-	var seam_big := 0
-	for cy9 in range(GameData.WORLD_ROWS - 1):
-		for cx9 in range(GameData.WORLD_COLS):
-			var d9b := (GameData.cell_elev(cx9, cy9) - GameData.cell_elev(cx9, cy9 + 1)) * lift
-			if d9b <= 32.0:
-				continue
-			seam_big += 1
-			if GameData.cell_terrain(cx9, cy9) == "水泽" or GameData.cell_terrain(cx9, cy9 + 1) == "水泽":
-				seam_water = maxf(seam_water, d9b)
-			else:
-				seam_land = maxf(seam_land, d9b)
-				seam_land_n += 1
-	## ⚠️ 这条**当前不满足**（陆-陆最大 120，全在出生平台北缘 cy=31 / x 67~72）——
-	##    它是**数据层**的问题（平台被烘焙成硬边方台），修法在 `gen_worldmap.mjs` 给平台加过渡带，
-	##    ⇒ 要动 worldmap.png + 重签 .sig，得 team-lead / 用户拍板，**先打印不设闸**，别假装守住了。
-	## ⭐⭐ TODO(同心层落地时一并处理)：team-lead M31.3 拍板 —— **本轮不修，别碰烘焙**。
-	##    根因：`gen_worldmap.mjs` 把「出生点 ±16 格平坝」写成**硬边方台**（range 右开 ⇒ 实际
-	##    32×32 格，x 40~71 / y 32~63），方格北缘 cy=31 一步从 e=1.00 掉到 0.40，
-	##    ⇒ 6 条陆-陆可通行大缝（60~120 世界单位），渲染层不许糊（见 `SKIRT_MAX` 注释）。
-	##    修法（将来）：平台外缘加 **3 格过渡带**，e 从 1.00 阶梯降到 0.40（每格 ≤0.05 ⇒ 单缝 ≤10）。
-	##    为什么等同心层：同心层本来就要重排 ZONES 与烘焙高程，两次动 `worldmap.png` 不如一次动；
-	##    且现在动 = 重签 .sig + 重跑全部地形断言，风险换不来观感收益（这 6 条缝在出生平台北缘，
-	##    玩家一出生就背对着它，实测三帧像素对照里它不在任何一个取景点的覆盖率里）。
-	print("[地形预警] 陆-陆可通行的大缝：%d 条，最大 %.0f 世界单位（>32 观感门槛；"
-			% [seam_land_n, seam_land]
-			+ "位置集中在出生平台北缘 cy=31；水陆交界大缝最大 %.0f，深水岸走不下去，不计入）"
-			% seam_water)
-	_check("陆-陆可通行的大缝（>32）不超过 8 条（绊线：锁住当前已知集合，不许扩散）",
-			seam_land_n <= 8,
-			"%d 条，最大 %.0f（当前已知：出生平台北缘 6 条 60~120；"
-			% [seam_land_n, seam_land]
-			+ "真要归零得回烘焙给平台加过渡带，那要动 worldmap.png，待拍板）")
-
-
-## ⭐ M31.3：**全屏暗缝覆盖率** —— 把外面那套「clear color 连通块统计」搬进引擎，
-##    直接按**世界数据 + 绘制源码的同一套几何**算"屏幕上哪些地方没有任何格子覆盖"，
-##    ⇒ 不依赖抓帧、不依赖肉眼（这轮已经眼误两次，不许再看图下结论）。
-## 算法：把视野切成 4×4 世界单位的粗网格，把「格子顶面」（+ 可选裙边）铺进去，
-##    没被铺到的网格占比 = 暗缝覆盖率。缝最窄 10 世界单位（一级台阶 0.05×200）→ 2~3 行网格，抓得住。
-## ⚠️ 只在自测里跑（有 resize，不在 _draw 里）。
-const GAP_GRID := 4.0
-
-
-func _gap_ratio_at(center: Vector2, use_skirt: bool) -> float:
-	var cell := GameData.WORLD_CELL
-	var vw := float(ProjectSettings.get_setting("display/window/size/viewport_width", 1366))
-	var vh := float(ProjectSettings.get_setting("display/window/size/viewport_height", 768))
-	var z9 := GameData.CAMERA_ZOOM
-	if is_instance_valid(camera):
-		z9 = maxf(camera.zoom.y, 0.01)
-	var half := Vector2(vw, vh) / z9 * 0.5
-	## ⚠️ 相机被世界边界夹住，取点时要照样夹 —— 不然取到边角会算出假的高覆盖率
-	var ctr := Vector2(
-			clampf(center.x, half.x, float(GameData.WORLD_COLS) * cell - half.x),
-			clampf(center.y, half.y, float(GameData.WORLD_ROWS) * cell - half.y))
-	var view := Rect2(ctr - half, half * 2.0)
-	var gw := int(ceilf(view.size.x / GAP_GRID))
-	var gh := int(ceilf(view.size.y / GAP_GRID))
-	var cov := PackedByteArray()
-	cov.resize(gw * gh)
-	var pad_up := cell * 2.0
-	var pad_dn := cell * 2.0 + GameData.ELEV_LIFT
-	var vis_r := Rect2(ctr - half - Vector2(cell * 2.0, pad_up),
-			half * 2.0 + Vector2(cell * 4.0, pad_up + pad_dn))
-	for cy in range(GameData.WORLD_ROWS):
-		for cx in range(GameData.WORLD_COLS):
-			var p := Vector2(float(cx) * cell, float(cy) * cell)
-			if not vis_r.has_point(p):
-				continue
-			var e := GameData.cell_elev(cx, cy)
-			var top := float(cy) * cell - e * GameData.ELEV_LIFT
-			_gap_mark(cov, view, gw, gh, Rect2(Vector2(p.x, top), Vector2(cell, cell)))
-			if use_skirt and GameData.in_map(Vector2i(cx, cy - 1)):
-				var d9 := (GameData.cell_elev(cx, cy - 1) - e) * GameData.ELEV_LIFT
-				if d9 > 0.01 and d9 <= SKIRT_MAX:      # ⚠️ 与绘制端同一条限高
-					_gap_mark(cov, view, gw, gh, Rect2(Vector2(p.x, top - d9), Vector2(cell, d9)))
-	var unc := 0
-	for v in cov:
-		if v == 0:
-			unc += 1
-	return 100.0 * float(unc) / float(maxi(gw * gh, 1))
-
-
-func _gap_mark(cov: PackedByteArray, view: Rect2, gw: int, gh: int, r: Rect2) -> void:
-	var x0 := int(floorf((maxf(r.position.x, view.position.x) - view.position.x) / GAP_GRID))
-	var x1 := int(ceilf((minf(r.position.x + r.size.x, view.position.x + view.size.x)
-			- view.position.x) / GAP_GRID))
-	var y0 := int(floorf((maxf(r.position.y, view.position.y) - view.position.y) / GAP_GRID))
-	var y1 := int(ceilf((minf(r.position.y + r.size.y, view.position.y + view.size.y)
-			- view.position.y) / GAP_GRID))
-	for gy in range(maxi(y0, 0), mini(y1, gh)):
-		for gx in range(maxi(x0, 0), mini(x1, gw)):
-			cov[gy * gw + gx] = 1
 
 
 func _check(label: String, ok: bool, detail: String = "") -> void:
@@ -4749,8 +4536,10 @@ func _run_selftest_body() -> void:
 			"当前 %s / 基线 %s" % [wsig, wsig_base])
 	_check("世界图签名是确定性的（连算两次一样，跨机器才可信）", GameData.world_sig() == wsig,
 			"两次算的不一样：%s vs %s" % [wsig, GameData.world_sig()])
-	## ⭐⭐ M31.3 收尾：地形参数的三条防线（级差 / 洞高 / 水面·泥沼占比），见 `_check_world_terrain()`
-	_check_world_terrain()
+	## ⭐⭐ 地形构成的回归防线（水面 / 泥沼占比），见 `_check_world_composition()`
+	##    ⚠️ 原来这里还有 7 条高度相关断言（级差 / 崖 / 洞高 / 平坝零暗缝 / 裙边覆盖率×2 /
+	##       陆-陆大缝），已随「地图做成平面」整套删除 —— 见文件头的删除记录。
+	_check_world_composition()
 
 	## ⭐⭐ M31 Step 0：**所有内容点的坐标必须落在世界矩形内**。
 	##    起因：这次世界从 5120 宽收窄到 3584 宽 —— 若按字面把 wscl 固定成 (4,4) 烘焙，

@@ -10,7 +10,9 @@ extends Node2D
 ##
 ## 跑法（窗口模式，headless 抓不到画面）：
 ##   Godot --path . --resolution 1366x768 -- \
-##        --x=1264 --y=368 --out=res://art/tools/preview_x.png [--skirt] [--flat]
+##        --x=1264 --y=368 --out=res://art/tools/preview_x.png [--flat]
+##    ⚠️ 原 `[--skirt]` 参数已随「地图做成平面」整套删除（南向裙边只为高度暗缝存在），
+##        留着这个文档位就是「文档≠实现」 —— 删代码时一并删掉。
 ##   退出码：0=出图成功；2=参数不合法；3=自检失败（**没出图**）；4=存图失败。
 ##
 ## `--flat`（素色直出，**测覆盖率必带**）：关 CanvasModulate / PostFx / HUD。
