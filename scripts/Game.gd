@@ -204,12 +204,16 @@ func _world_tile_of(tn: String) -> Texture2D:
 		"竹林": return _world_tile("res://art/tiles/grass.png")
 		"灵岩": return _world_tile("res://art/tiles/rock.png")
 		"灵田": return _world_tile("res://art/tiles/grass.png")
+		## ⭐ M31.3：泥沼还没有自己的贴图，先用草地底 + 调色顶着（见 `_world_tint_of`）。
+		##    等美术出图只要改这里一行，别的地方都不用动。
+		"泥沼": return _world_tile("res://art/tiles/grass.png")
 		_: return _world_tile("res://art/tiles/grass.png")
 
 func _world_tint_of(tn: String) -> Color:
 	match tn:
 		"竹林": return Color(0.60, 0.78, 0.60)      # 竹林 = 草地压暗偏绿（没有独立贴图，先靠调色）
 		"灵田": return Color(1.15, 1.18, 0.92)      # 灵田 = 偏黄
+		"泥沼": return Color(0.86, 0.80, 0.58)      # 泥沼 = 压暗偏黄褐（湿地，不是水：不偏蓝）
 		_: return Color(1.0, 1.0, 1.0)
 
 ## ⭐ M30.26：**实体激活半径**（interest management）—— 大世界真正该先做的一步。
@@ -1487,6 +1491,81 @@ func _regen_world_sig() -> void:
 	f.close()
 	print("[world_sig] 基线已写入 %s = %s" % [GameData.WORLD_SIG_PATH, sig])
 	get_tree().quit(0)
+
+
+## ⭐⭐ M31.3 收尾：**地形参数的三条防线**（烘焙参数的回归测试）。
+##    起因：这一轮烘焙学会了两件事 —— ① 动 `LEVELS` / `ELEV_LIFT` 会**同时**改掉崖的判定、
+##    移动手感和画面观感，而三者原本都没有任何检测；② 上一轮全靠人眼看图才发现问题。
+##    这三条把「靠人记」变成「改坏就红」。
+##
+## ⚠️ 三条各自守什么，别合并（合并了就不知道红在哪）：
+##   A **量化级差**：用 **最小非零** 相邻高差（= 量化步长 1/(LEVELS-1)），不是最大值。
+##     全图 max 是 120 世界单位，那是水陆边界 / 出生点平台的**有意崖**，拿它当 bug 就永远红。
+##     守的是「LEVELS 变粗或 LIFT 变大 → **所有台缘都成崖** → 画面看着是墙人却能走上去」。
+##   B **洞高**：`max(向南下降) × LIFT ≤ 半屏高`。守黑带。判据推导见 `GameData.ELEV_LIFT` 注释。
+##   C **水面 / 泥沼占比**：守「水面悄悄没了」和「新增地形被烘没了」。
+func _check_world_terrain() -> void:
+	if not GameData.world_ready():
+		return
+	var lift := GameData.ELEV_LIFT
+	var cliff_w := GameData.CLIFF_STEP * lift            # 崖的世界单位上限（12）
+	# 半屏高度换算成**世界单位**：视口像素 ÷ zoom ÷ 2。⚠️ 别写死 192（改 zoom 就错）
+	# ⚠️⚠️ **不能用 `get_viewport_rect()`**：headless 下窗口是**方的**（实测 (1366,1366)），
+	#    算出来是 341.5 而不是 192 —— 这条防线在 CI（headless）里就形同虚设，等于没写。
+	#    改用工程里配的视口高度，headless 与窗口模式都是 768 → 半屏 192。
+	var vh := float(ProjectSettings.get_setting("display/window/size/viewport_height", 768))
+	var z9 := GameData.CAMERA_ZOOM
+	if is_instance_valid(camera):
+		z9 = maxf(camera.zoom.y, 0.01)
+	var half_h := vh * 0.5 / z9
+	var step := 1.0          # 最小非零相邻高差 = 量化步长
+	var cliff_n := 0
+	var pair_n := 0
+	var max_drop := 0.0      # 最大「向南下降」× LIFT = 最大洞高（世界单位）
+	var water := 0
+	var marsh := 0
+	for cy in range(GameData.WORLD_ROWS):
+		for cx in range(GameData.WORLD_COLS):
+			var tn := GameData.cell_terrain(cx, cy)
+			if tn == "水泽":
+				water += 1
+			elif tn == "泥沼":
+				marsh += 1
+			var e := GameData.cell_elev(cx, cy)
+			for k in range(2):
+				var nx2: int = cx + (1 if k == 0 else 0)
+				var ny2: int = cy + (0 if k == 0 else 1)
+				if not GameData.in_map(Vector2i(nx2, ny2)):
+					continue
+				var ad := absf(GameData.cell_elev(nx2, ny2) - e)
+				pair_n += 1
+				if ad > 1e-6 and ad < step:
+					step = ad
+				if ad > GameData.CLIFF_STEP:
+					cliff_n += 1
+			if GameData.in_map(Vector2i(cx, cy + 1)):
+				max_drop = maxf(max_drop, (e - GameData.cell_elev(cx, cy + 1)) * lift)
+	var total := GameData.WORLD_COLS * GameData.WORLD_ROWS
+	var cliff_pct := 100.0 * float(cliff_n) / float(maxi(pair_n, 1))
+	var water_pct := 100.0 * float(water) / float(total)
+	var marsh_pct := 100.0 * float(marsh) / float(total)
+	_check("量化级差 × LIFT ≤ 崖阈值（守「所有台缘都变崖」）", step * lift <= cliff_w + 0.001,
+			"%.2f 世界单位 > %.2f（量化步长 %.4f = 1/20；LEVELS 变粗或 LIFT 变大必红）"
+			% [step * lift, cliff_w, step])
+	_check("全图崖占比 ≤ 10%（守「满地是崖、寸步难行」）", cliff_pct <= 10.0,
+			"%.1f%%（%d/%d 组相邻关系是崖）" % [cliff_pct, cliff_n, pair_n])
+	_check("最大「向南下降」洞高 ≤ 半屏高（守黑带）", max_drop <= half_h + 0.001,
+			"洞高 %.0f > 半屏 %.0f（洞 = 只画顶面不画竖面的必然产物，洞高 = Δe×LIFT）"
+			% [max_drop, half_h])
+	_check("ELEV_LIFT 不超过「半屏高 ×1.25」容忍带（黑带已到上限，别再加）", lift <= half_h * 1.25,
+			"LIFT %.0f > %.0f（半屏 %.0f）。当前 200 已超半屏 8px，是用户知情接受的值，不是 bug"
+			% [lift, half_h * 1.25, half_h])
+	_check("水面占比 8~12%（烘焙参数的直接产物，守「水面悄悄没了」）",
+			water_pct >= 8.0 and water_pct <= 12.0,
+			"%.1f%%（%d/%d 格）" % [water_pct, water, total])
+	_check("泥沼存在且不过量（M31.3 新增地形，守「被烘没了」）",
+			marsh > 0 and marsh_pct < 10.0,
+			"%.2f%%（%d 格）" % [marsh_pct, marsh])
 
 
 func _check(label: String, ok: bool, detail: String = "") -> void:
@@ -4521,6 +4600,8 @@ func _run_selftest_body() -> void:
 			"当前 %s / 基线 %s" % [wsig, wsig_base])
 	_check("世界图签名是确定性的（连算两次一样，跨机器才可信）", GameData.world_sig() == wsig,
 			"两次算的不一样：%s vs %s" % [wsig, GameData.world_sig()])
+	## ⭐⭐ M31.3 收尾：地形参数的三条防线（级差 / 洞高 / 水面·泥沼占比），见 `_check_world_terrain()`
+	_check_world_terrain()
 
 	## ⭐⭐ M31 Step 0：**所有内容点的坐标必须落在世界矩形内**。
 	##    起因：这次世界从 5120 宽收窄到 3584 宽 —— 若按字面把 wscl 固定成 (4,4) 烘焙，
