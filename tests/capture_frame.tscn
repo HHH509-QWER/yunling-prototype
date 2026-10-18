@@ -1,0 +1,6 @@
+[gd_scene format=3 uid="uid://cfrm31cap9rame"]
+
+[ext_resource type="Script" uid="uid://dcfg31cap9rame" path="res://tests/capture_frame.gd" id="1_cap"]
+
+[node name="CaptureFrame" type="Node2D"]
+script = ExtResource("1_cap")
