@@ -42,6 +42,14 @@ var bag_full_hint := false
 ## 地上这枚印你**已经有一枚**了（同时唯一性 §2.1）时的提示 —— 也是给 HUD 看的。
 ## ⚠️ M29.5 起「命窍满」不再是失败：装不进命窍的印进**背包**（收藏无上限）。
 var seize_dup_hint := false
+
+## ⭐ 强夺提示里的**品阶数序**与**措辞短语**（游有方终稿裁定）。
+## ⚠️ 这两张是**文案表**，不是数值表 —— 写死是安全的：改文案只动这里，不需要动 REALMS。
+## ⚠️ 但**境界名**绝不写死：那是从 `GameData.REALMS` 反推的（`Player.seal_gate_of()`）。
+##    手写「3→金丹」对照表会随境界表一起过期 —— 我们已为「手写 ρ 表」「注释里的 330」
+##    付过两次学费，不付第三次。
+const SEAL_TIER_ORD := {3: "三", 4: "四", 5: "五"}
+const SEAL_TIER_WORD := {3: "上品之印", 4: "绝品之印", 5: "传说之印"}
 ## 锚点快照：敌人（谁活着 / 在哪 / 多少血）+ 采集点（哪些空了）。
 ## ⭐ 死亡 = 恢复这张快照 —— 死之后杀掉的敌人会回来、采空的点会复原（待决问题 8）。
 var snapshot: Dictionary = {}
@@ -660,6 +668,24 @@ func _tick_juice(delta: float) -> void:
 				camera.offset = Vector2.ZERO
 
 
+## ⭐ 强夺提示的「品阶 / 措辞 / 解封境界」三件套（rank 3 起才有；1/2 无封印，不走这条路）。
+## ⚠️ 兜底原则：**绝不返回空串**。将来冒出 6 品时 toast 里出现「· 品 —— ，需 才能驾驭」
+##    等于又说一遍假话 —— 这正是这次要修的毛病本身。未知 rank 用数字当数序、用「绝世之印」
+##    当措辞、用最高境界当门槛，至少句子是完整的（自测里那条断言盯着 3/4/5 三个值）。
+func _seal_tier_of(name_key: String) -> Dictionary:
+	var rank := 1
+	if GameData.SEALS.has(name_key):
+		rank = int(GameData.SEALS[name_key]["rank"])
+	var keys: Array = GameData.REALMS.keys()
+	keys.sort()
+	var realm := str(GameData.REALMS[keys[-1]]["name"])     ## 兜底 = 最高境界
+	var gate := player.seal_gate_of(name_key)               ## ⭐ 复用 Player 的查表，不重写
+	if gate != "":
+		realm = gate
+	return {"ord": SEAL_TIER_ORD.get(rank, str(rank)),
+			"word": SEAL_TIER_WORD.get(rank, "绝世之印"), "realm": realm}
+
+
 ## 掉落物自动拾取 + 提示计时。
 ## ⭐ 背包满时**不捡走** —— 东西留在地上，绝不凭空消失。
 func _tick_pickups(delta: float) -> void:
@@ -686,7 +712,16 @@ func _tick_pickups(delta: float) -> void:
 				if player.bag_seals.has(str(p.item)):
 					pickup_toast = "获得 %s（命窍满了，先放背包）" % p.item
 				else:
-					pickup_toast = "强夺 %s（要炼化满才能用）" % p.item
+					var nk := str(p.item)
+					if player.is_sealed(nk):
+						## ⚠️ 旧文案「要炼化满才能用」在被境界封印时是**假的**：
+						##    炼满一枚要 130 灵力（≈1.3 管，且全脚本无自动回复），
+						##    玩家砸完才发现仍用不了。这里把「要等到哪一重」直接说清。
+						var t := _seal_tier_of(nk)
+						pickup_toast = "强夺 %s · %s品 —— %s，需 %s 才能驾驭" % [
+								nk, t["ord"], t["word"], t["realm"]]
+					else:
+						pickup_toast = "强夺 %s（要炼化满才能用）" % nk
 				pickup_toast_t = 2.6
 				pickups.erase(p)
 				p.queue_free()
@@ -3946,6 +3981,23 @@ func _run_selftest_body() -> void:
 			"cap=%d" % player.seal_rank_cap())
 	player.realm = 1
 	player.refresh_limits()
+
+	# 3b. ⭐ 强夺提示的品阶文案（见 `_seal_tier_of()`）：3/4/5 品各自有解，1/2 品无封印。
+	#     ⚠️ 守的是那条**已发货的错误承诺**：被境界封印时旧文案「要炼化满才能用」是假的
+	#        （炼满 = 130 灵力 ≈1.3 管，且全脚本无自动回复 —— 砸完才发现仍用不了）。
+	#        将来冒出 6 品而文案表没补，toast 会变成「· 品 —— ，需 才能驾驭」，
+	#        等于同一句假话换个地方复发 —— 这条先挡住。
+	var tier_bad := ""
+	for tier_rank in [3, 4, 5]:
+		var gm: String = player.seal_gate_realm_name(tier_rank)
+		var od: String = str(SEAL_TIER_ORD.get(tier_rank, ""))
+		var wd: String = str(SEAL_TIER_WORD.get(tier_rank, ""))
+		if gm == "" or od == "" or wd == "":
+			tier_bad += "rank%d=[境界%s|数序%s|措辞%s] " % [tier_rank, gm, od, wd]
+	if player.seal_gate_realm_name(1) != "" or player.seal_gate_realm_name(2) != "":
+		tier_bad += "1/2品不该有封印 "
+	_check("强夺提示：3/4/5 品各有境界名+数序+措辞，1/2 品无封印（toast 不许出现空串）",
+			tier_bad == "", "缺口：%s" % tier_bad)
 
 	# 4. 小境界：修为的刻度，不是独立进度
 	player.realm = 1
