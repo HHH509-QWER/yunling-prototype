@@ -71,6 +71,11 @@ var fg_layer: Node2D = null       # 懒建：第一次打开时才挂上来
 ##    ⚠️ 不是"画一面崖壁墙"：M30.13e 用户否决的正是"灰墙看着像地图上乱摆的障碍"。
 ##    ⇒ 不许描边 / 阴影 / 渐变，那些会让它读成独立物件而不是地形本身的延续。
 ##    ⚠️ 与 F9/F10 同一个规矩：**默认关，把待验证假设变成点一下**，让用户自己定价。
+## ⚠️⚠️ **只填 ≤ 一级台阶的缝**（`SKIRT_MAX`）。更大的缝**不许在渲染层糊**：
+##    一条 122 世界单位（2.5 个身高）的同色竖条 = 一面地色的墙，而 `can_step()` 对高差放行
+##    ⇒ 正是 `GameData.ELEV_LIFT` 注释里写死的那句「画面看着是墙、人却能走上去，用户否决过」。
+##    大缝是**数据层**的问题（见 `_check_world_terrain()` 末尾那条预警），回去查烘焙，别在渲染层盖。
+const SKIRT_MAX := 10.5    # 一级台阶 = 量化步长 1/20 × ELEV_LIFT 200 = 10，留 0.5 浮点余量
 var skirt := false
 var seal_panel: Control = null    # 命窍 / 炼化面板（在场景里，由 _ready 接线）
 var forge_panel: Control = null   # 合炼面板（在场景里，由 _ready 接线）
@@ -553,7 +558,9 @@ func _draw_world_height() -> void:
 		##       M30.13e 否决的是"看着像障碍的墙"，裙边必须读作地形本身的延续。
 		if skirt and GameData.in_map(Vector2i(cx, cy - 1)):
 			var d9 := (GameData.cell_elev(cx, cy - 1) - e) * GameData.ELEV_LIFT
-			if d9 > 0.01:
+			## ⚠️ 限高：只补 ≤ 一级台阶的缝。超过的**故意不画** —— 那是数据层的异常落差，
+			##    在这儿补出来就是一面能穿过去的墙（见 `SKIRT_MAX` 的注释）。
+			if d9 > 0.01 and d9 <= SKIRT_MAX:
 				var sr := Rect2(Vector2(at.x, at.y - d9), Vector2(cell, d9))
 				if tn == "水泽":
 					draw_rect(sr, Color(0.12, 0.26, 0.40).lerp(
@@ -1646,12 +1653,42 @@ func _check_world_terrain() -> void:
 			Vector2(2672.0, 656.0), Vector2(2256.0, 2320.0)]:
 		gap_on = maxf(gap_on, _gap_ratio_at(pt, true))
 		gap_off = maxf(gap_off, _gap_ratio_at(pt, false))
-	_check("裙边开启时全屏暗缝覆盖率 ≤ 1%（守「裙边逻辑被改坏」）", gap_on <= 1.0,
-			"%.1f%%（四取景点最大值；算法见 `_gap_ratio_at`，缝=没有任何格子覆盖的屏幕区域）"
-			% gap_on)
+	## ⚠️ 阈值按「裙边只填 ≤ 一级台阶」之后的新现实重标：开裙边**不会归零**（大缝故意不填），
+	##    守的是"小缝被填掉"这件事本身 ⇒ 用"开了必须比关了明显少"作判据（留 1 个点余量）。
+	_check("裙边开启后暗缝覆盖率必须下降（守「裙边逻辑被改坏 / 被限死」）", gap_on < gap_off - 1.0,
+			"关 %.1f%% → 开 %.1f%%（只填 ≤%.1f 的缝，大缝故意留着；算法见 `_gap_ratio_at`）"
+			% [gap_off, gap_on, SKIRT_MAX])
 	_check("裙边关闭时暗缝覆盖率 ≤ 30%（绊线：记录默认观感，只挡突然恶化）", gap_off <= 30.0,
-			"%.1f 个百分点（裙边默认关，这是当前默认观感的已知值；像素实测口径 drop 24.2）"
-			% gap_off)
+			"%.1f 个百分点（裙边默认关，这是当前默认观感的已知值）" % gap_off)
+	## ⭐ 判据（team-lead 拍板，取代"未覆盖率%"）：**单条最大缝高 ≤ 一格高(32)，且不存在 >32 的缝**。
+	##    ⚠️ 分两类报：水陆交界的深水岸（走不下去，不是"能穿过去的墙"）与陆-陆可通行缝（是真问题）。
+	var seam_land := 0.0        # 陆-陆（可通行）最大缝高
+	var seam_water := 0.0       # 至少一侧是水的最大缝高
+	var seam_land_n := 0
+	var seam_big := 0
+	for cy9 in range(GameData.WORLD_ROWS - 1):
+		for cx9 in range(GameData.WORLD_COLS):
+			var d9b := (GameData.cell_elev(cx9, cy9) - GameData.cell_elev(cx9, cy9 + 1)) * lift
+			if d9b <= 32.0:
+				continue
+			seam_big += 1
+			if GameData.cell_terrain(cx9, cy9) == "水泽" or GameData.cell_terrain(cx9, cy9 + 1) == "水泽":
+				seam_water = maxf(seam_water, d9b)
+			else:
+				seam_land = maxf(seam_land, d9b)
+				seam_land_n += 1
+	## ⚠️ 这条**当前不满足**（陆-陆最大 120，全在出生平台北缘 cy=31 / x 67~72）——
+	##    它是**数据层**的问题（平台被烘焙成硬边方台），修法在 `gen_worldmap.mjs` 给平台加过渡带，
+	##    ⇒ 要动 worldmap.png + 重签 .sig，得 team-lead / 用户拍板，**先打印不设闸**，别假装守住了。
+	print("[地形预警] 陆-陆可通行的大缝：%d 条，最大 %.0f 世界单位（>32 观感门槛；"
+			% [seam_land_n, seam_land]
+			+ "位置集中在出生平台北缘 cy=31；水陆交界大缝最大 %.0f，深水岸走不下去，不计入）"
+			% seam_water)
+	_check("陆-陆可通行的大缝（>32）不超过 8 条（绊线：锁住当前已知集合，不许扩散）",
+			seam_land_n <= 8,
+			"%d 条，最大 %.0f（当前已知：出生平台北缘 6 条 60~120；"
+			% [seam_land_n, seam_land]
+			+ "真要归零得回烘焙给平台加过渡带，那要动 worldmap.png，待拍板）")
 
 
 ## ⭐ M31.3：**全屏暗缝覆盖率** —— 把外面那套「clear color 连通块统计」搬进引擎，
@@ -1694,7 +1731,7 @@ func _gap_ratio_at(center: Vector2, use_skirt: bool) -> float:
 			_gap_mark(cov, view, gw, gh, Rect2(Vector2(p.x, top), Vector2(cell, cell)))
 			if use_skirt and GameData.in_map(Vector2i(cx, cy - 1)):
 				var d9 := (GameData.cell_elev(cx, cy - 1) - e) * GameData.ELEV_LIFT
-				if d9 > 0.01:
+				if d9 > 0.01 and d9 <= SKIRT_MAX:      # ⚠️ 与绘制端同一条限高
 					_gap_mark(cov, view, gw, gh, Rect2(Vector2(p.x, top - d9), Vector2(cell, d9)))
 	var unc := 0
 	for v in cov:
