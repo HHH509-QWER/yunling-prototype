@@ -13,7 +13,9 @@ extends Node2D
 ##        --x=1264 --y=368 --out=res://art/tools/preview_x.png [--skirt] [--flat]
 ##   退出码：0=出图成功；2=参数不合法；3=自检失败（**没出图**）；4=存图失败。
 ##
-## `--flat`（素色直出，**测覆盖率必带**）：关 CanvasModulate / PostFx / 云 / 远山。
+## `--flat`（素色直出，**测覆盖率必带**）：关 CanvasModulate / PostFx / HUD。
+##    ⚠️ M31.3 后这里不再提「云 / 远山」—— 那两层已被**彻底删除**（用户拍板），
+##        素色直出只剩「关压暗 + 关后处理 + 关 HUD」三件事。
 ##    默认画面叠着压暗+分级+半透，暗地形和 clear color 只差几个灰阶 ⇒
 ##    像素统计把暗地形数进"未覆盖"（前两轮眼误的土壤）。素色直出后画面只剩
 ##    「地形 or clear color」，`art/tools/pixel_gap.py` 才量得准。

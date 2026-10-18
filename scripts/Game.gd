@@ -82,7 +82,7 @@ var fg_layer: Node2D = null       # 懒建：第一次打开时才挂上来
 const SKIRT_MAX := 32.5    # 一格高 = WORLD_CELL 32，留 0.5 浮点余量
 var skirt := false
 ## ⭐ M31.3：**素色直出**（命令行 `--flat`，抓帧测量专用）。
-##    抓帧默认画面叠着 CanvasModulate 压暗 + 后处理分级 + 云/远山半透 ⇒ 暗地形和
+##    抓帧默认画面叠着 CanvasModulate 压暗 + 后处理分级 ⇒ 暗地形和
 ##    clear color 只差几个灰阶，像素统计根本分不开（前两轮"把暗紫块当地形"的眼误就是这么来的）。
 ##    素色直出 = 关掉这些叠层，让画面只剩「地形 or clear color」两种可能 ——
 ##    测的是**几何覆盖**，光照调色全都不影响几何，关掉不损失任何结论效力。
@@ -281,13 +281,14 @@ func _apply_activation(arr: Array, pp: Vector2) -> void:
 			e.visible = want
 
 
-## ⭐ M30.27：**远景层 / 空气透视** —— 「大世界」四根支柱里最值的一条：
-##    ① **边缘雾**：世界四周一圈雾，越靠边越浓 —— 大脑把它读成「那边还有很远」。
-##    ② **山脊剪影**：北边界一条锯齿山脊，颜色**洗淡偏青蓝**（空气透视），
-##       并且**只跟着相机挪一小部分**（视差 0.35）→ 它看起来「在很远的后方」。
+## ⭐ M30.27：**远景层 / 空气透视** —— 「大世界」四根支柱里的一条，**现在只剩 ①**：
+##    ① **边缘雾**：世界上下的薄雾带 —— 大脑把它读成「那边还有很远」。
 ##    ⚠️ 两条纪律：
 ##      · 必须画在世界之前（背景）；
 ##      · 全部由**位置**算（不用随机数），所以每帧稳定、不会闪。
+## ⚠️ M31.3 后（用户拍板）：原 ② **山脊剪影** 与 M30.27 **云带** 已**彻底删除** ——
+##    不是加开关、不是调淡。俯视角里程序画的远景条带读不出「山」，只会被看成一条脏带子；
+##    真要远山，等美术的远景贴图（那是背景层资源，不属于程序绘制）。
 ## ⭐ M30.28：**环境压暗 + 点光** —— 画面从"能看"到"有氛围"的开关。
 ##    `CanvasModulate` 把整个 2D 画布压暗并染冷色；`PointLight2D` 在关键位置打暖光。
 ##    ⚠️ 三条纪律：
@@ -342,114 +343,14 @@ func _setup_lighting() -> void:
 
 
 func _draw_far() -> void:
-	## ⭐ M30.30：**远景层（最终版）** —— 只做两件事：世界上下边缘的薄雾带。
-	##    ⚠️ 之前那版（6 层 × 4 边 + 北侧山脊）在实机上会让**整屏变黑**，
+	## ⭐ M30.30：**远景层（最终版）** —— 只做一件事：世界上下的两条边缘薄雾带。
+	##    ⚠️ 之前那版（6 层 × 4 边）在实机上会让**整屏变黑**，
 	##       而最小化函数体后地形又正常 → 说明是那些大面积叠加矩形在 Compatibility 下的绘制问题。
-	##       所以这里**只用两条最简单的雾带**（不做循环、不做山脊），先把"边缘有雾"落地；
-	##       山脊剪影留到以后用真实的远景贴图（美术图）来做，而不是程序画条带。
+	##       所以这里**只用两条最简单的雾带**（不做循环、不做大面积叠加）。
+	##    ⚠️ M31.3 后：山脊剪影 / 云带已彻底删除（用户拍板）。**边缘雾保留** —— 空气透视的底子。
 	var ws2: Vector2 = GameData.WORLD["size"]
 	draw_rect(Rect2(Vector2(0.0, 0.0), Vector2(ws2.x, 200.0)), Color(0.56, 0.63, 0.72, 0.10))
 	draw_rect(Rect2(Vector2(0.0, ws2.y - 200.0), Vector2(ws2.x, 200.0)), Color(0.56, 0.63, 0.72, 0.10))
-
-
-
-## ⭐ M30.27：**云带**（前景薄雾）—— 低透明度、缓慢横向漂移，给画面"气"。
-## ⭐ M31.3：**云从"三条矩形"改成"一团"** —— 一团 = 6 个半径不同的重叠圆，
-##    边缘靠圆的交叠堆出来，不再是方角。之前那版是 `draw_rect`，一眼看得出是条。
-##    ⚠️ 全部由**时间与序号**算（无随机数）→ 每帧稳定、不会闪。
-func _draw_clouds() -> void:
-	var ws: Vector2 = GameData.WORLD["size"]
-	var t := float(Time.get_ticks_msec()) / 1000.0
-	for b in range(3):
-		var yy := ws.y * (0.20 + 0.30 * float(b)) + sin(t * 0.13 + float(b)) * 20.0
-		var xx := fmod(t * (6.0 + float(b) * 4.0) + float(b) * 1400.0, ws.x + 1200.0) - 600.0
-		_draw_puff(xx, yy, 150.0 - 34.0 * float(b), 0.055 - 0.007 * float(b))
-
-
-## 一团云：6 个圆叠出蓬松边缘（比矩形贵不了多少，但一眼就是云）
-func _draw_puff(cx: float, cy: float, w: float, a: float) -> void:
-	var col := Color(0.78, 0.84, 0.90, a)
-	draw_circle(Vector2(cx, cy), w * 0.30, col)
-	draw_circle(Vector2(cx + w * 0.02, cy + w * 0.11), w * 0.24, col)
-	draw_circle(Vector2(cx - w * 0.26, cy + w * 0.07), w * 0.21, col)
-	draw_circle(Vector2(cx + w * 0.29, cy + w * 0.05), w * 0.19, col)
-	draw_circle(Vector2(cx - w * 0.10, cy - w * 0.13), w * 0.18, col)
-	draw_circle(Vector2(cx + w * 0.13, cy - w * 0.11), w * 0.16, col)
-
-
-## ⭐ M31.3：**远山剪影**（两层 + 空气透视）—— 「修仙界」里"大"的那一半。
-##
-## **为什么画在世界之后、而不是之前**：俯视角没有地平线，世界铺满整屏，
-##    画在背景层会被地形整片盖掉、一点都看不见。山必须落在**屏幕顶部那条带**上，
-##    压在地形之上 —— 那一条带在玩家眼里就是"北边、很远"。
-##
-## **为什么用缓存折线 + draw_set_transform**：项目红线是 `_draw()` 里不许分配。
-##    山脊形状是**静态**的（只由峰序号决定），所以只建一次，每帧只挪绘制原点。
-##
-## **视差**：远层 0.18 / 近层 0.35 —— 挪得越慢，大脑读成越远。
-## **空气透视**：远层更淡更青蓝、近层更实更深（现实里越远越被空气"洗白"）。
-##
-## ⚠️ 三条纪律：
-##   ① alpha 压得很低（≤0.34）+ 下缘三层渐隐 —— 绝不遮住怪和采集点；
-##   ② 自测模式跳过（与 `_draw_far()` 一致：自测不跑表现层，省得 headless 里空转）；
-##      ⚠️ 更正一处旧注释：`tests/fx_probe.tscn` 是**独立场景**，根本不加载 Game.gd，
-##         它翻不翻红和这里没关系 —— 真正的原因只是"自测不测表现层"。
-##   ③ **必须把 transform 复位**：`draw_set_transform` 会影响之后所有绘制调用。
-const RIDGE_STEP := 128.0
-const RIDGE_W := 4352.0          # 够宽：视差位移 0.65×3584 + 一屏，走到东边也不会露出端点
-const RIDGE_BAND := 150.0        # 山脚相对屏幕顶的位置（世界像素）
-const RIDGE_PAR := [0.18, 0.35]  # 远层 → 近层（视差系数，越小越远）
-const RIDGE_COL := [Color(0.58, 0.65, 0.75, 0.24), Color(0.38, 0.44, 0.55, 0.32)]
-var _ridge_polys: Array[PackedVector2Array] = []
-
-
-## 峰高只由 (序号, 层) 决定 → 同一座山永远一样高，不闪、不抖
-func _ridge_poly(layer: int) -> PackedVector2Array:
-	var pts := PackedVector2Array()
-	var n := int(RIDGE_W / RIDGE_STEP)
-	pts.append(Vector2(0.0, 0.0))
-	for i in range(n):
-		var x0 := float(i) * RIDGE_STEP
-		var r1 := float((i * 7919 + layer * 104729) % 997) / 997.0       # 大起伏
-		var r2 := float((i * 104729 + layer * 7919) % 89) / 89.0         # 小锯齿
-		var peak := 46.0 + 52.0 * r1 + 16.0 * r2 + float(layer) * 14.0
-		pts.append(Vector2(x0 + RIDGE_STEP * 0.28, -peak * 0.55))
-		pts.append(Vector2(x0 + RIDGE_STEP * 0.52, -peak))
-		pts.append(Vector2(x0 + RIDGE_STEP * 0.78, -peak * 0.42))
-	pts.append(Vector2(RIDGE_W, 0.0))
-	return pts
-
-
-func _draw_ridges() -> void:
-	if selftest or not is_instance_valid(camera):
-		return
-	if _ridge_polys.is_empty():
-		_ridge_polys = [_ridge_poly(0), _ridge_poly(1)]
-	var z9 := camera.zoom
-	z9 = Vector2(maxf(z9.x, 0.01), maxf(z9.y, 0.01))
-	var half: Vector2 = get_viewport_rect().size / z9 * 0.5
-	var ctr: Vector2 = camera.global_position
-	var top_y := ctr.y - half.y
-	var base_y := top_y + RIDGE_BAND
-	var span := half.x * 2.0
-	## 顶部薄霾：把山脊上缘缝进地形，免得看成"贴在屏幕上的一条带"
-	draw_rect(Rect2(Vector2(ctr.x - half.x, top_y), Vector2(span, 64.0)), Color(0.62, 0.69, 0.78, 0.10))
-	for L in range(2):
-		var par := float(RIDGE_PAR[L])
-		## ⭐ 左端外扩量**跟着视口算**，不能写死常数（原来写的是 -300，复核时改掉）：
-		##    记可见左边缘 u = ctr.x - half.x（相机被 limit 夹住时 u ≥ 0），要求 tx ≤ u 恒成立。
-		##    取 tx = (1-par)*(ctr.x - half.x) - 48  →  tx - u = -par*u - 48 ≤ 0，**任意视口宽都成立**。
-		##    ⚠️ 写死 -300 为什么不行：`window/stretch/aspect = "expand"`，视口宽会随窗口变，
-		##       half.x 不是定值；窗口拉宽到 ~1460px 以上时远层（par=0.18）左端会缩进屏幕里露馅。
-		##    右端由 RIDGE_W 兜住（余量 3000+，任何现实视口都够），所以只改左边这一项。
-		var tx := (1.0 - par) * (ctr.x - half.x) - 48.0
-		draw_set_transform(Vector2(tx, base_y), 0.0, Vector2.ONE)
-		draw_colored_polygon(_ridge_polys[L], RIDGE_COL[L] as Color)
-		draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)      # ⚠️ 必复位
-	## 下缘渐隐：三层递减 alpha，让山"化"进地里，而不是硬切一条边
-	for k in range(3):
-		draw_rect(Rect2(Vector2(ctr.x - half.x, base_y + float(k) * 30.0), Vector2(span, 30.0)),
-				Color(0.56, 0.63, 0.72, 0.09 - 0.03 * float(k)))
 
 
 func _draw_world() -> void:
@@ -1393,9 +1294,8 @@ func _notification(what: int) -> void:
 
 
 func _draw() -> void:
-	# ⭐ M30.27：**远景层**（边缘雾 + 山脊）画在**世界之前** —— 背景必须先画，否则会盖住玩家。
-	# ⚠️ M30.27 远景层暂时**关闭**：开启后画面全黑（日志无报错 → 是覆盖关系问题，不是脚本错）。
-	# #    代码保留，下一批定位：先把边缘雾/山脊分开单独开关，逐个排除。   # ⚠️ M30.27 暂时关闭：开启后画面全黑（待排障）
+	# ⭐ M30.27：**远景层**（边缘雾）画在**世界之前** —— 背景必须先画，否则会盖住玩家。
+	# ⚠️ M31.3 后：远景层**只剩边缘雾**（`_draw_far()`）；山脊剪影与云带已彻底删除（用户拍板）。
 	_draw_far()
 	# 世界底色（M7）：⭐ 放在最前面 —— 父节点先画，所以它天然是背景
 	_draw_world()
@@ -1429,24 +1329,8 @@ func _draw() -> void:
 			draw_string(font, at, str(n["text"]), HORIZONTAL_ALIGNMENT_CENTER, 60.0, 15,
 					Color(n["color"], fade))
 
-	# ⭐ M30.27：**云带**（前景薄雾）—— 画在地形之后，才有"雾在人和地之间"的层次。
-	#    ⚠️ M31.3 更正措辞（行为不变、云不挪）：原文「画在实体之后」是**错的** —— Godot 的
-	#       CanvasItem 顺序是**父节点的 `_draw()` 画在子节点之前**，而玩家/敌人全是 `Game`
-	#       的子节点（详见 `ForegroundLayer.gd` 头注释），所以这里的云实际落在**实体之下**。
-	#       定案原文说的是「在**人和地**之间」= 地形 < 云 < 人 —— 现状正好命中，别再挪。
-	#       想让云盖到人，该挂 `FgLayer`（`_set_fg_occlusion`，z_index=64），不是改这一行。
-	# ⭐ M31.3：**远山剪影** —— 画在云**之前**（山比云远，近盖远）。俯视角没有地平线，
-	#    必须压在地形之上，落在屏幕顶部那条带上才读得出"北边很远的地方有山"。
-	#    ⚠️ 素色直出（--flat，抓帧测量专用，见 `debug_flat` 注释）时跳过。
-	if not debug_flat:
-		_draw_ridges()
-	# ⭐ 云（近雾）画在山**之后** —— 山是远景、云是近雾，语义上必须近盖远。
-	#    ⚠️ M31.3 更正：原来这里是云在前、山在后，把"近的被远的盖"写反了（只改顺序不改行为量级：
-	#       云 alpha 0.055 vs 山 0.24，视觉变化可忽略）。
-	if not debug_flat:
-		_draw_clouds()
 	# ⭐ M30.24（用户定案）：**那套"地面上撒竹子"不要了**（"太丑"）。
-	#    大世界的尺度感不靠地面装饰，靠**远处的层次**（山影 / 雾 / 空气透视）——
+	#    大世界的尺度感不靠地面装饰，靠**远处的层次**（雾 / 空气透视）——
 	#    而那属于**背景层**（要画在 _draw 的最前面），不是这里。
 	#    ⭐ M31.3：`_draw_foreground()` 现在**可开关**了（命令行 `-- --foreground` 或 F9，默认关）。
 	#    它不在这里调用 —— 原因不是"还没做"，而是**在这里调用遮不住人**：
