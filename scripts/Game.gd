@@ -1560,17 +1560,36 @@ func _check_world_terrain() -> void:
 	var cliff_pct := 100.0 * float(cliff_n) / float(maxi(pair_n, 1))
 	var water_pct := 100.0 * float(water) / float(total)
 	var marsh_pct := 100.0 * float(marsh) / float(total)
-	_check("量化级差 × LIFT ≤ 崖阈值（守「所有台缘都变崖」）", step * lift <= cliff_w + 0.001,
-			"%.2f 世界单位 > %.2f（量化步长 %.4f = 1/20；LEVELS 变粗或 LIFT 变大必红）"
+	## ⭐ M31.3 收尾复核：**那条"黑带"守的是 bug，不是几何**（queue_redraw 被短路，fbe4fab 已修）。
+	##    下面三条按"它到底守得住什么"重新定性，守不住的一律改名或删掉 ——
+	##    留一条永远绿、又挡不住任何东西的断言，等于养一条看起来在工作的防线。
+	_check("量化级差 × LIFT ≤ 崖阈值（守「每级台缘的暗缝宽度」）", step * lift <= cliff_w + 0.001,
+			"%.2f 世界单位 > %.2f（量化步长 %.4f = 1/20；崖壁不画，所以这一级差 = 每级台缘暗缝的高度）"
 			% [step * lift, cliff_w, step])
-	_check("全图崖占比 ≤ 10%（守「满地是崖、寸步难行」）", cliff_pct <= 10.0,
-			"%.1f%%（%d/%d 组相邻关系是崖）" % [cliff_pct, cliff_n, pair_n])
-	_check("最大「向南下降」洞高 ≤ 半屏高（守黑带）", max_drop <= half_h + 0.001,
-			"洞高 %.0f > 半屏 %.0f（洞 = 只画顶面不画竖面的必然产物，洞高 = Δe×LIFT）"
+	_check("全图崖占比 ≤ 10%（守「暗缝密度」）", cliff_pct <= 10.0,
+			"%.1f%%（%d/%d 组相邻关系是崖 → 就有多少条暗缝）" % [cliff_pct, cliff_n, pair_n])
+	## ⚠️ 这条**只挡灾难性回归**（LIFT 翻倍 / 落差暴增才会红），不挡观感：
+	##    暗缝的观感门槛是一格高 32（`ELEV_LIFT < 53`），当前 120 世界单位**并不达标**，
+	##    那是已知代价，正解是补南向裙边（见 `GameData.ELEV_LIFT` 注释），不是压落差。
+	##    别把这条阈值当成"合格线"去调 —— 它只是"别再坏下去"的绊线。
+	_check("最大「向南下降」暗缝高度 ≤ 半屏高（绊线：只挡灾难性回归，不挡观感）",
+			max_drop <= half_h + 0.001,
+			"暗缝 %.0f > 半屏 %.0f（缝高 = Δe×LIFT，只在向南下降处出现；观感门槛是 32，当前不达标）"
 			% [max_drop, half_h])
-	_check("ELEV_LIFT 不超过「半屏高 ×1.25」容忍带（黑带已到上限，别再加）", lift <= half_h * 1.25,
-			"LIFT %.0f > %.0f（半屏 %.0f）。当前 200 已超半屏 8px，是用户知情接受的值，不是 bug"
-			% [lift, half_h * 1.25, half_h])
+	## ⭐ 新增（替代被删掉的「LIFT ≤ 半屏×1.25」那条 —— 它守的"黑带"已被证伪，纯装饰，删）：
+	##    出生点平坝（±16 格）内海拔被烘焙成同一档 ⇒ **必须零向南级差 ⇒ 零暗缝**。
+	##    这条守的是"主城/出生区画面干净"，一旦重烘焙把平坝打散（LEVELS 或清场半径改了）立刻红。
+	var spawn_drop := 0.0
+	var cc := Vector2i(GameData.WORLD_COLS / 2, GameData.WORLD_ROWS / 2)
+	for cy in range(cc.y - 16, cc.y + 16):
+		for cx in range(cc.x - 16, cc.x + 16):
+			if not GameData.in_map(Vector2i(cx, cy + 1)):
+				continue
+			spawn_drop = maxf(spawn_drop,
+					(GameData.cell_elev(cx, cy) - GameData.cell_elev(cx, cy + 1)) * lift)
+	_check("出生点平坝（±16 格）内零暗缝（守「主城/出生区画面干净」）", spawn_drop <= 0.001,
+			"平坝内最大向南级差 %.2f 世界单位（平坝必须同档；LEVELS 或清场半径改了必红）"
+			% spawn_drop)
 	_check("水面占比 8~12%（烘焙参数的直接产物，守「水面悄悄没了」）",
 			water_pct >= 8.0 and water_pct <= 12.0,
 			"%.1f%%（%d/%d 格）" % [water_pct, water, total])
