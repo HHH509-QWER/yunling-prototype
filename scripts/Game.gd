@@ -64,6 +64,14 @@ var camera: Camera2D = null       # 跟着主角走的相机（在场景里，�
 ##    ⚠️ 默认关 = 场景树完全不变（节点懒建），对自测零影响。
 var fg_occlusion := false
 var fg_layer: Node2D = null       # 懒建：第一次打开时才挂上来
+## ⭐ M31.3：**南向裙边**开关（F11，默认关）。
+##    每格只画顶面 ⇒ 北邻比自己高时，两格之间露出一条**底色竖条**，
+##    缝高 = Δe×ELEV_LIFT（实测 h21×w64 = 一级台阶 × 一格宽 @zoom2）。
+##    裙边 = 把自己（低格）的顶面**同色同纹理向上延伸** Δ 顶到北邻底边 ——
+##    ⚠️ 不是"画一面崖壁墙"：M30.13e 用户否决的正是"灰墙看着像地图上乱摆的障碍"。
+##    ⇒ 不许描边 / 阴影 / 渐变，那些会让它读成独立物件而不是地形本身的延续。
+##    ⚠️ 与 F9/F10 同一个规矩：**默认关，把待验证假设变成点一下**，让用户自己定价。
+var skirt := false
 var seal_panel: Control = null    # 命窍 / 炼化面板（在场景里，由 _ready 接线）
 var forge_panel: Control = null   # 合炼面板（在场景里，由 _ready 接线）
 var trade_panel: Control = null   # 交易面板（在场景里，由 _ready 接线）
@@ -136,6 +144,9 @@ func _ready() -> void:
 	# ⭐ M31.3：前景遮挡开关（默认关）。放在自测分支**之前**，探针跑起来也能带上它。
 	if OS.get_cmdline_user_args().has("--foreground"):
 		_set_fg_occlusion(true)
+	# ⭐ M31.3：南向裙边开关（`--skirt`），与前景遮挡同一套：默认关，抓帧对照时显式开。
+	if OS.get_cmdline_user_args().has("--skirt"):
+		skirt = true
 	# ⭐ M31.3：**世界图签名** —— 重烘焙后启动即报警（自测里还有断言兜底，见 `_check_world_sig`）。
 	_check_world_sig()
 	# ⭐ M31.3：`--worldsig` = 重建基线。**这是唯一的更新路径**，见 `_regen_world_sig()`。
@@ -521,6 +532,7 @@ func _draw_world_height() -> void:
 		var at := Vector2(float(cx) * cell, float(cy) * cell - e * GameData.ELEV_LIFT)
 		var r := Rect2(at, Vector2(cell, cell))
 		var tn := GameData.cell_terrain(cx, cy)
+		var tex: Texture2D = null
 		if tn == "水泽":
 			# 水：按深浅上色（深 = 暗）。真正的 autotile 水岸是下一批
 			var d := GameData.cell_depth(cx, cy)
@@ -529,12 +541,31 @@ func _draw_world_height() -> void:
 			## ⭐ M31.2（P1）：**接缝处理** —— 两件事一起做才不"像色块"：
 			##    ① 用 autotile 变体（`auto_<地形>_<掩码>.png`）：需要画边的那侧有暗边+内亮边
 			##    ② 在边界内侧叠 2 层**邻居色**的低透明渐变 → 颜色是"过渡"过去的，不是硬切
-			var tex := _auto_tile(tn, cx, cy)
+			tex = _auto_tile(tn, cx, cy)
 			if tex != null:
 				draw_texture_rect(tex, r, false, _world_tint_of(tn))
 			else:
 				draw_rect(r, GameData.WORLD_TERRAIN_COLORS.get(tn, Color(0.16, 0.20, 0.16)))
 			_blend_seams(r, tn, cx, cy)
+		## ⭐ M31.3：**南向裙边**（F11）—— 把自己（低格）的顶面**向上延伸** Δ 顶到北邻底边。
+		##    Δ = (e_北 − e_自己) × ELEV_LIFT，正好等于那条露出底色的缝高；
+		##    ⚠️ 用**自己的**颜色/纹理（不是灰色墙面），且不加描边/阴影/渐变 ——
+		##       M30.13e 否决的是"看着像障碍的墙"，裙边必须读作地形本身的延续。
+		if skirt and GameData.in_map(Vector2i(cx, cy - 1)):
+			var d9 := (GameData.cell_elev(cx, cy - 1) - e) * GameData.ELEV_LIFT
+			if d9 > 0.01:
+				var sr := Rect2(Vector2(at.x, at.y - d9), Vector2(cell, d9))
+				if tn == "水泽":
+					draw_rect(sr, Color(0.12, 0.26, 0.40).lerp(
+							Color(0.04, 0.11, 0.22), GameData.cell_depth(cx, cy)))
+				elif tex != null:
+					var ts := tex.get_size()
+					# 只取贴图的**顶部**对应的那一段（缝比一格高时取整张拉伸），避免压扁感
+					draw_texture_rect_region(tex, sr,
+							Rect2(Vector2.ZERO, Vector2(ts.x, ts.y * minf(1.0, d9 / cell))),
+							_world_tint_of(tn))
+				else:
+					draw_rect(sr, GameData.WORLD_TERRAIN_COLORS.get(tn, Color(0.16, 0.20, 0.16)))
 		# ⭐ M30.13e（用户定案）：**不再画崖壁竖面** —— 那些灰墙看着像地图上乱摆的障碍。
 		#    高度还在（每格按海拔偏移 + 低的先画高的后画 = 遮挡），只是不画"墙"了。
 
@@ -1226,6 +1257,12 @@ func _input(event: InputEvent) -> void:
 		_set_fg_occlusion(not fg_occlusion)
 		print("[前景遮挡] %s（F9 切换）" % ("开" if fg_occlusion else "关"))
 		get_viewport().set_input_as_handled()
+	# ⭐ M31.3：F11 = 南向裙边开关（默认关，见 `skirt`）。同上，不动 project.godot。
+	elif event is InputEventKey and event.pressed and not event.echo \
+			and event.keycode == KEY_F11:
+		skirt = not skirt
+		print("[南向裙边] %s（F11 切换）" % ("开" if skirt else "关"))
+		get_viewport().set_input_as_handled()
 
 
 ## ⭐ M31.3：前景遮挡开关。节点**懒建 + 复用**：关着的时候场景树保持原样，
@@ -1377,10 +1414,13 @@ func _draw() -> void:
 	#       的子节点（详见 `ForegroundLayer.gd` 头注释），所以这里的云实际落在**实体之下**。
 	#       定案原文说的是「在**人和地**之间」= 地形 < 云 < 人 —— 现状正好命中，别再挪。
 	#       想让云盖到人，该挂 `FgLayer`（`_set_fg_occlusion`，z_index=64），不是改这一行。
-	_draw_clouds()
-	# ⭐ M31.3：**远山剪影** —— 画在云之后（山比云远）。俯视角没有地平线，
+	# ⭐ M31.3：**远山剪影** —— 画在云**之前**（山比云远，近盖远）。俯视角没有地平线，
 	#    必须压在地形之上，落在屏幕顶部那条带上才读得出"北边很远的地方有山"。
 	_draw_ridges()
+	# ⭐ 云（近雾）画在山**之后** —— 山是远景、云是近雾，语义上必须近盖远。
+	#    ⚠️ M31.3 更正：原来这里是云在前、山在后，把"近的被远的盖"写反了（只改顺序不改行为量级：
+	#       云 alpha 0.055 vs 山 0.24，视觉变化可忽略）。
+	_draw_clouds()
 	# ⭐ M30.24（用户定案）：**那套"地面上撒竹子"不要了**（"太丑"）。
 	#    大世界的尺度感不靠地面装饰，靠**远处的层次**（山影 / 雾 / 空气透视）——
 	#    而那属于**背景层**（要画在 _draw 的最前面），不是这里。
@@ -1596,6 +1636,83 @@ func _check_world_terrain() -> void:
 	_check("泥沼存在且不过量（M31.3 新增地形，守「被烘没了」）",
 			marsh > 0 and marsh_pct < 10.0,
 			"%.2f%%（%d 格）" % [marsh_pct, marsh])
+	## ⭐ M31.3：**全屏暗缝覆盖率**（四个取景点：出生点 + 上轮抓帧的 drop/shore/slope）
+	##    ⚠️ 校准依据：修复前像素实测 drop 24.2% / shore 10.5% / slope 3.7%。
+	##    ① 裙边**开**时应≈0 —— 这条守的是"裙边逻辑以后被改坏"（改坏立刻红）。
+	##    ② 裙边**关**时是当前默认观感，只作绊线（≤30%，防止哪天突然翻倍）。
+	var gap_on := 0.0
+	var gap_off := 0.0
+	for pt in [Vector2(1792.0, 1536.0), Vector2(1264.0, 368.0),
+			Vector2(2672.0, 656.0), Vector2(2256.0, 2320.0)]:
+		gap_on = maxf(gap_on, _gap_ratio_at(pt, true))
+		gap_off = maxf(gap_off, _gap_ratio_at(pt, false))
+	_check("裙边开启时全屏暗缝覆盖率 ≤ 1%（守「裙边逻辑被改坏」）", gap_on <= 1.0,
+			"%.1f%%（四取景点最大值；算法见 `_gap_ratio_at`，缝=没有任何格子覆盖的屏幕区域）"
+			% gap_on)
+	_check("裙边关闭时暗缝覆盖率 ≤ 30%（绊线：记录默认观感，只挡突然恶化）", gap_off <= 30.0,
+			"%.1f 个百分点（裙边默认关，这是当前默认观感的已知值；像素实测口径 drop 24.2）"
+			% gap_off)
+
+
+## ⭐ M31.3：**全屏暗缝覆盖率** —— 把外面那套「clear color 连通块统计」搬进引擎，
+##    直接按**世界数据 + 绘制源码的同一套几何**算"屏幕上哪些地方没有任何格子覆盖"，
+##    ⇒ 不依赖抓帧、不依赖肉眼（这轮已经眼误两次，不许再看图下结论）。
+## 算法：把视野切成 4×4 世界单位的粗网格，把「格子顶面」（+ 可选裙边）铺进去，
+##    没被铺到的网格占比 = 暗缝覆盖率。缝最窄 10 世界单位（一级台阶 0.05×200）→ 2~3 行网格，抓得住。
+## ⚠️ 只在自测里跑（有 resize，不在 _draw 里）。
+const GAP_GRID := 4.0
+
+
+func _gap_ratio_at(center: Vector2, use_skirt: bool) -> float:
+	var cell := GameData.WORLD_CELL
+	var vw := float(ProjectSettings.get_setting("display/window/size/viewport_width", 1366))
+	var vh := float(ProjectSettings.get_setting("display/window/size/viewport_height", 768))
+	var z9 := GameData.CAMERA_ZOOM
+	if is_instance_valid(camera):
+		z9 = maxf(camera.zoom.y, 0.01)
+	var half := Vector2(vw, vh) / z9 * 0.5
+	## ⚠️ 相机被世界边界夹住，取点时要照样夹 —— 不然取到边角会算出假的高覆盖率
+	var ctr := Vector2(
+			clampf(center.x, half.x, float(GameData.WORLD_COLS) * cell - half.x),
+			clampf(center.y, half.y, float(GameData.WORLD_ROWS) * cell - half.y))
+	var view := Rect2(ctr - half, half * 2.0)
+	var gw := int(ceilf(view.size.x / GAP_GRID))
+	var gh := int(ceilf(view.size.y / GAP_GRID))
+	var cov := PackedByteArray()
+	cov.resize(gw * gh)
+	var pad_up := cell * 2.0
+	var pad_dn := cell * 2.0 + GameData.ELEV_LIFT
+	var vis_r := Rect2(ctr - half - Vector2(cell * 2.0, pad_up),
+			half * 2.0 + Vector2(cell * 4.0, pad_up + pad_dn))
+	for cy in range(GameData.WORLD_ROWS):
+		for cx in range(GameData.WORLD_COLS):
+			var p := Vector2(float(cx) * cell, float(cy) * cell)
+			if not vis_r.has_point(p):
+				continue
+			var e := GameData.cell_elev(cx, cy)
+			var top := float(cy) * cell - e * GameData.ELEV_LIFT
+			_gap_mark(cov, view, gw, gh, Rect2(Vector2(p.x, top), Vector2(cell, cell)))
+			if use_skirt and GameData.in_map(Vector2i(cx, cy - 1)):
+				var d9 := (GameData.cell_elev(cx, cy - 1) - e) * GameData.ELEV_LIFT
+				if d9 > 0.01:
+					_gap_mark(cov, view, gw, gh, Rect2(Vector2(p.x, top - d9), Vector2(cell, d9)))
+	var unc := 0
+	for v in cov:
+		if v == 0:
+			unc += 1
+	return 100.0 * float(unc) / float(maxi(gw * gh, 1))
+
+
+func _gap_mark(cov: PackedByteArray, view: Rect2, gw: int, gh: int, r: Rect2) -> void:
+	var x0 := int(floorf((maxf(r.position.x, view.position.x) - view.position.x) / GAP_GRID))
+	var x1 := int(ceilf((minf(r.position.x + r.size.x, view.position.x + view.size.x)
+			- view.position.x) / GAP_GRID))
+	var y0 := int(floorf((maxf(r.position.y, view.position.y) - view.position.y) / GAP_GRID))
+	var y1 := int(ceilf((minf(r.position.y + r.size.y, view.position.y + view.size.y)
+			- view.position.y) / GAP_GRID))
+	for gy in range(maxi(y0, 0), mini(y1, gh)):
+		for gx in range(maxi(x0, 0), mini(x1, gw)):
+			cov[gy * gw + gx] = 1
 
 
 func _check(label: String, ok: bool, detail: String = "") -> void:
