@@ -30,6 +30,10 @@ var follow_target: Node2D = null      # 跟着主角走
 var follow_offset := Vector2.ZERO     # = 数据表里的 mount（贴附部位）
 var game: Node = null                 # 用来问「场上有哪些敌人」
 
+## ⭐ 变异词条名（为空 = 这枚印没变异）。由 Player 显化时写进来。
+##    为什么挂在 Seal 上而不是数据表：变异是**这一枚印的**经历，不是印种的属性。
+var mutation := ""
+
 var _flash := 0.0
 var _bob := 0.0
 var _dead := false
@@ -37,7 +41,10 @@ var _dead := false
 var _cd := 0.0                        # 招式冷却
 var _last_target: Node2D = null       # 上一发打的是谁（只用于画反馈线）
 var _pending_bolt: Node2D = null      # 惊雷印的预警：还没落下来的那一道
+var _pending_dmg := 0.0               # 那一道落雷已经算好的伤害（打出去时定格，之后不再重算）
 var _bolt_t := 0.0
+var _aoe_at := Vector2.ZERO           # 最近一次范围技的中心（画反馈用）
+var _aoe_t := 0.0
 
 
 func setup(name_key: String, hp_value: float, target: Node2D, offset: Vector2, owner_game: Node) -> void:
@@ -62,7 +69,61 @@ func skill() -> Dictionary:
 
 
 func kind() -> String:
-	return str(skill()["kind"])
+	return str(skill().get("kind", "none"))
+
+
+## ⭐⭐ 这枚印的**伤害标签**（弱点系统读它）。
+##    基础标签来自数据表；变异词条可以再挂一个（§3.3：变异 = 印上的一条词条）。
+##    ⚠️ 去重：数据表里已经写了「火」，变异再挂「火」不该 ×2。
+func tags() -> Array:
+	var out: Array = []
+	for t in (data().get("tags", []) as Array):
+		if not out.has(str(t)):
+			out.append(str(t))
+	if mutation != "":
+		var aff: Dictionary = GameData.mutation_affix(mutation)
+		for t2 in (aff.get("tags", []) as Array):
+			if not out.has(str(t2)):
+				out.append(str(t2))
+	return out
+
+
+## 招式这一下打多少。⭐⭐ **「普攻是标尺」**（数值设计 v2 §0 第一条锚点）：
+##    数据表里写了 `power` 就按「普攻 × 倍率」算，没写就回退到写死的 `damage`。
+##    ⇒ 老印的行为一点没变，新印从一开始就跟着境界走。
+##    ⚠️ 倍率还要乘 `rank_scale`（升阶加成）和主角的 `damage_mult`（碎石印那种穿刺被动）。
+func _hit_power() -> float:
+	var s := skill()
+	var rk := rank_scale * _mutation_mult()
+	if s.has("power"):
+		return _realm_base_attack() * float(s["power"]) * rk * _owner_damage_mult()
+	return float(s.get("damage", 0.0)) * rk
+
+
+## 主角这一阶的普攻伤害（= 标尺）。
+func _realm_base_attack() -> float:
+	if follow_target != null and is_instance_valid(follow_target) and "realm" in follow_target:
+		return float(GameData.attack_of(int(follow_target.realm))["damage"])
+	return float(GameData.attack_of(1)["damage"])
+
+
+## 主角身上的「伤害倍率」被动（碎石印的穿刺 6%）；没有就 1.0。
+func _owner_damage_mult() -> float:
+	if follow_target != null and is_instance_valid(follow_target) and follow_target.has_method("damage_mult"):
+		return float(follow_target.damage_mult())
+	return 1.0
+
+
+## 变异词条带来的额外倍率（三大质变统一 ×1.5；词条自带 damage_mult 就覆盖它）。
+func _mutation_mult() -> float:
+	if mutation == "":
+		return 1.0
+	var aff: Dictionary = GameData.mutation_affix(mutation)
+	if aff.is_empty():
+		return 1.0
+	if aff.has("damage_mult"):
+		return float(aff["damage_mult"])
+	return float(GameData.MUTATION["damage_mult"])
 
 
 ## 还活着吗。⭐ Enemy 选目标、Player 找护主都要问它 —— 和 Enemy.take_damage 一族保持同名，
@@ -92,7 +153,9 @@ func take_damage(dmg: float) -> void:
 ## ⭐ 只有这一个出口 —— 否则收回之后敌人身上还会留着灼烧。
 func break_skill() -> void:
 	_pending_bolt = null
+	_pending_dmg = 0.0
 	_bolt_t = 0.0
+	_aoe_t = 0.0
 	_last_target = null
 
 
@@ -100,14 +163,16 @@ func break_skill() -> void:
 func step_skill(delta: float) -> void:
 	if _dead:
 		return
+	if _aoe_t > 0.0:
+		_aoe_t = maxf(0.0, _aoe_t - delta)
 
 	# 先结算「上一发惊雷」的预警：到点了才真的劈下来
 	if _pending_bolt != null:
 		_bolt_t -= delta
 		if _bolt_t <= 0.0:
 			if is_instance_valid(_pending_bolt) and _pending_bolt.has_method("take_damage"):
-				# 落雷：紫色跳字（重击，带停顿与震屏）
-				_pending_bolt.take_damage(_power(float(skill()["damage"])), Color(0.74, 0.64, 0.98))
+				# 落雷：紫色跳字（重击，带停顿与震屏）。⭐ 带「雷」标签 ⇒ 吃雷弱点、吃潮湿 ×2
+				_pending_bolt.take_damage(_pending_dmg, Color(0.74, 0.64, 0.98), true, tags())
 			_pending_bolt = null
 			queue_redraw()
 
@@ -120,10 +185,12 @@ func step_skill(delta: float) -> void:
 			return                                  # 常驻：由 Player.take_damage() 主动来问它
 		"shield":
 			return                                  # 一次性防御：盾挂在主角身上，它自己不行动
+		"none":
+			return                                  # 垫子印（落叶 / 泥巴）：本来就不打人
 		"ember":
 			var t := pick_target(float(skill()["range"]))
 			if t != null:
-				t.add_dot(_power(float(skill()["damage"])), float(skill()["duration"]), self, float(skill()["tick"]),
+				t.add_dot(_hit_power(), float(skill()["duration"]), self, float(skill()["tick"]),
 						Color(0.98, 0.66, 0.34))          # 灼烧：橙色跳字
 				_last_target = t
 				_cd = float(skill()["cooldown"])
@@ -132,8 +199,24 @@ func step_skill(delta: float) -> void:
 			var t2 := pick_target(float(skill()["range"]))
 			if t2 != null:
 				_pending_bolt = t2                      # 先挂预警，到点才落雷
+				_pending_dmg = _hit_power()
 				_bolt_t = float(skill()["warn"])
 				_last_target = t2
+				_cd = float(skill()["cooldown"])
+				queue_redraw()
+		"pierce":
+			## 碎石印：单体穿透一击（倍率高、没有附加效果）。打的是「最靠近」的那个。
+			var t4 := pick_target(float(skill()["range"]))
+			if t4 != null:
+				t4.take_damage(_hit_power(), Color(0.86, 0.84, 0.72), true, tags())
+				_last_target = t4
+				_cd = float(skill()["cooldown"])
+				queue_redraw()
+		"aoe":
+			## 组合印统一的「圆形范围 + 一条状态」。五种组合印共用这一支。
+			var t3 := pick_target(float(skill().get("range", 120.0)))
+			if t3 != null:
+				_cast_aoe(t3.position)
 				_cd = float(skill()["cooldown"])
 				queue_redraw()
 		"heal":
@@ -143,6 +226,52 @@ func step_skill(delta: float) -> void:
 				follow_target.heal(_power(float(skill()["heal"])))
 				_cd = float(skill()["cooldown"])
 				queue_redraw()
+
+
+## ⭐⭐ 组合印的范围技（§2.2）：一个圆 + 一条状态 +（可选）麻痹 / 击退。
+##    ⚠️ 走 `take_damage(..., tags)`，所以**组合印也吃弱点** ——
+##       雷雨印（水/雷）打在怕雷的灵狐身上就是 ×1.2。这是「选对了印」的回报。
+func _cast_aoe(at: Vector2) -> void:
+	var r := float(skill().get("radius", 90.0))
+	var pw := _hit_power()
+	var tg := tags()
+	var st: Dictionary = skill().get("status", {})
+	var stun := float(skill().get("stun", 0.0))
+	var knock := float(skill().get("knockback", 0.0))
+	var no_dodge := bool(skill().get("no_dodge", false))
+	_aoe_at = at
+	_aoe_t = 0.35
+	if game == null or not is_instance_valid(game) or not ("enemies" in game):
+		return
+	for e in (game.enemies as Array).duplicate():
+		if not is_instance_valid(e) or not e.is_alive():
+			continue
+		if e.position.distance_to(at) > r:
+			continue
+		if pw > 0.0:
+			e.take_damage(pw, Color(0.92, 0.86, 0.66), true, tg)
+		if not is_instance_valid(e) or not e.is_alive():
+			continue
+		if stun > 0.0 and e.has_method("stun_for"):
+			e.stun_for(stun)
+		if not st.is_empty() and e.has_method("apply_status"):
+			e.apply_status(str(st["name"]), float(st["time"]))
+		if no_dodge and e.has_method("set_no_dodge"):
+			e.set_no_dodge(float(st.get("time", 3.0)))
+		if knock > 0.0:
+			var dirv: Vector2 = (e.position as Vector2) - at
+			if dirv.length_squared() < 0.001:
+				dirv = Vector2.RIGHT
+			e.position += dirv.normalized() * knock
+
+
+## 范围技的**中心**（画反馈用）。
+func aoe_center() -> Vector2:
+	return _aoe_at
+
+
+func aoe_active() -> bool:
+	return _aoe_t > 0.0
 
 
 ## 升阶放大招式数值。⭐ 只有这一处缩放 —— 想改「十等收益」只改 GameData.RANK_GAIN。
@@ -174,6 +303,12 @@ func state_text() -> String:
 			return "护主中"
 		"shield":
 			return "护盾中"
+		"pierce":
+			return "穿刺·待发"
+		"aoe":
+			return "范围·待发"
+		"none":
+			return "垫子印"
 	return "显化中"
 
 
@@ -221,6 +356,12 @@ func _draw() -> void:
 	# 招式反馈：让「它在干什么」一眼可见
 	if _pending_bolt != null and is_instance_valid(_pending_bolt):
 		draw_line(Vector2.ZERO, to_local(_pending_bolt.position), Color(0.85, 0.85, 1.0, 0.55), 2.0)
+	elif _aoe_t > 0.0:
+		## 组合印的范围：一圈**立刻消失**的环 —— 不画持续领域，只画「这一下打到哪儿」。
+		var rr := float(skill().get("radius", 90.0))
+		var k := clampf(_aoe_t / 0.35, 0.0, 1.0)
+		var at := to_local(_aoe_at)
+		draw_arc(at, rr * (1.0 - 0.25 * k), 0.0, TAU, 36, Color(col.r, col.g, col.b, 0.55 * k), 3.0)
 	elif kind() == "guard" and follow_target != null:
 		draw_line(Vector2.ZERO, to_local(follow_target.position), Color(0.55, 0.80, 0.95, 0.35), 2.0)
 

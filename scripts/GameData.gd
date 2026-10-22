@@ -32,7 +32,12 @@ const PLAYER := {
 			##    缺键会回退到无后缀的 `walk`；所以**斜向必须显式指向左右**，否则斜着走会
 			##    退回旧 HD 图，风格瞬间跳走。这是四方向游戏的通行做法。
 			"walk": {"frames": ["res://art/units_hd/p4_d.png"], "fps": 10.0, "loop": true},
-			"walk_d": {"frames": ["res://art/units_hd/p4_d.png"], "fps": 10.0, "loop": true},
+			"walk_d": {"frames": [
+				"res://art/units_hd/p4_d_walk_1.png",
+				"res://art/units_hd/p4_d_walk_2.png",
+				"res://art/units_hd/p4_d_walk_3.png",
+				"res://art/units_hd/p4_d_walk_4.png",
+			], "fps": 9.0, "loop": true},
 			"walk_u": {"frames": ["res://art/units_hd/p4_u.png"], "fps": 10.0, "loop": true},
 			"walk_l": {"frames": ["res://art/units_hd/p4_l.png"], "fps": 10.0, "loop": true},
 			"walk_r": {"frames": ["res://art/units_hd/p4_r.png"], "fps": 10.0, "loop": true},
@@ -220,6 +225,20 @@ static func combo_key(a: String, b: String) -> String:
 	var pair: Array = [a, b]
 	pair.sort()
 	return "%s|%s" % [pair[0], pair[1]]
+
+
+## ⭐ M35：印诀的**伤害标签** = 两枚印标签的并集（弱点系统读它）。
+##    为什么印诀也要吃弱点：§6 里「碧眼灵狐 · 强光破」说的是**印**克制它，
+##    而印诀是两枚印合起来的那一下 —— 它当然也该算「你用了对的那个属性」。
+static func combo_tags(key: String) -> Array:
+	var out: Array = []
+	for part in str(key).split("|"):
+		if not SEALS.has(str(part)):
+			continue
+		for t in (SEALS[str(part)].get("tags", []) as Array):
+			if not out.has(str(t)):
+				out.append(str(t))
+	return out
 
 
 ## ---------------- 闪避与冲刺（M20）----------------
@@ -454,7 +473,372 @@ const SEALS := {
 			"amount": 45.0,                   # 比磐石印更厚的盾
 		},
 	},
+
+	# ==================== 以下是《数值设计》v2 §2.1 新增的三枚基础印 ====================
+	## ⭐ 碎石印：**第一枚「伤害写倍率」的印** —— `power: 2.0` = 普攻 × 2.0。
+	##    为什么从这里开始改：§0 第一条锚点是「普攻是标尺，所有伤害写成普攻 × 倍率」。
+	##    上面那七枚还是写死的绝对值（它们是 M3~M12 时代的产物，改动会连带一批已锁定的
+	##    断言和手感），从新印开始走倍率，老的等一次专门的平衡轮再迁。
+	##    ⚠️ 两种写法在 `Seal._hit_power()` 里**共存**：有 `power` 用倍率，没有就回退 `damage`。
+	"碎石印": {
+		"tags": ["岩", "穿"],
+		"shape": "shard",
+		"rank": 2,
+		## 炼化被动 = 穿刺 +6%。实现成 `damage_mult`（伤害 ×1.06）——
+		## ⚠️ 工程里还没有「护甲」这个量，所以「无视 6% 防御」目前只能等价成「伤害 +6%」。
+		##    等敌人有护甲了，这里换成真的穿甲，字段名不用动。
+		"base": {"stat": "damage_mult", "value": 1.06},
+		"activate": 12.0,
+		"drain": 0.0,
+		"life": "instant",
+		"seal_hp_max": 50.0,
+		"passive": "damage_mult",
+		"passive_value": 1.06,
+		"radius": 12.0,
+		"color": Color(0.74, 0.71, 0.62),
+		"visual": {"texture": "res://art/seals/seal_shard.png"},
+		"body_part": "右手",
+		"skill": {
+			"kind": "pierce",
+			"range": 150.0,
+			"cooldown": 1.6,
+			"power": 2.0,
+		},
+	},
+	## ⭐ 落叶印 / 泥巴印：§2.1 最后一行 —— **垫子印**（`skill.kind = "none"`）。
+	##    它们不能打、不能防，存在的意义只有两个：当融合的副印、当破阶的祭品。
+	##    为什么游戏需要这种东西：融合要「副印」，如果每一枚副印都得是能打的印，
+	##    那玩家永远舍不得融 —— 有一批「本来就是喂的」印，融合才下得去手。
+	##    ⚠️ `life = "instant"` + `kind = "none"` ⇒ 显化后当帧就自动收回（不烧灵力、不掉血）。
+	"落叶印": {
+		"tags": ["木"],
+		"shape": "leaf2",
+		"rank": 1,
+		"base": {"stat": "attack_damage", "value": 1},
+		"activate": 2.0,
+		"drain": 0.0,
+		"life": "instant",
+		"seal_hp_max": 30.0,
+		"passive": "attack_damage",
+		"passive_value": 1.0,
+		"radius": 9.0,
+		"color": Color(0.62, 0.74, 0.38),
+		"visual": {"texture": "res://art/seals/seal_fallen.png"},
+		"body_part": "周身",
+		"skill": {"kind": "none"},
+	},
+	"泥巴印": {
+		"tags": ["土"],
+		"shape": "mud",
+		"rank": 1,
+		"base": {"stat": "hp_max", "value": 6},
+		"activate": 2.0,
+		"drain": 0.0,
+		"life": "instant",
+		"seal_hp_max": 30.0,
+		"passive": "damage_taken",
+		"passive_value": 0.97,
+		"radius": 10.0,
+		"color": Color(0.55, 0.45, 0.32),
+		"visual": {"texture": "res://art/seals/seal_mud.png"},
+		"body_part": "周身",
+		"skill": {"kind": "none"},
+	},
+
+	# ==================== 以下是《数值设计》v2 §2.2 的五枚**组合印** ====================
+	## ⭐ 组合印 = 融合配方的产物：**占 1 个槽、自带一门复合技**。
+	##    它们和「变异词条」是两个正交的维度（§2.2 抬头那句）：
+	##    组合印可以没有变异，变异也可以挂在任何普通印上。
+	## ⚠️ `fusion_only: true` = **不能从世界上捡到、不能商人买**，只能融出来。
+	##    `recipe` 是融合配方（无序，用 combo_key 比较）—— 和 COMBOS 的键同一个规矩。
+	## ⚠️ 这五枚的招式统一用 `kind: "aoe"`：一个圆形范围 + 一条状态。
+	##    一种写法吃五种印，加第六枚组合印只加数据（§2.2 那张表本来就是这么排的）。
+	"雷雨印": {
+		"tags": ["水", "雷"],
+		"shape": "storm",
+		"rank": 2,
+		"fusion_only": true,
+		"recipe": ["云雨印", "惊雷印"],
+		"base": {"stat": "essence_max", "value": 14},
+		"activate": 24.0,
+		"drain": 0.0,
+		"life": "instant",
+		"seal_hp_max": 60.0,
+		"passive": "attack_cooldown",
+		"passive_value": 0.92,
+		"radius": 13.0,
+		"color": Color(0.52, 0.72, 0.95),
+		"visual": {"texture": "res://art/seals/seal_thunderrain.png"},
+		"body_part": "左臂",
+		"skill": {
+			"kind": "aoe",
+			"range": 130.0,
+			"radius": 95.0,
+			"cooldown": 3.0,
+			"power": 2.5,
+			## 必潮湿 + 麻痹：潮湿是雷系的引子（惊雷印打在潮湿上 ×2），麻痹是硬控。
+			"status": {"name": "wet", "time": 4.0},
+			"stun": 0.6,
+		},
+	},
+	"沸血印": {
+		"tags": ["火", "水"],
+		"shape": "boil",
+		"rank": 2,
+		"fusion_only": true,
+		"recipe": ["灰烬印", "云雨印"],
+		"base": {"stat": "attack_damage", "value": 5},
+		"activate": 22.0,
+		"drain": 0.0,
+		"life": "instant",
+		"seal_hp_max": 55.0,
+		"passive": "attack_damage",
+		"passive_value": 4.0,
+		"radius": 12.0,
+		"color": Color(0.88, 0.52, 0.42),
+		"visual": {"texture": "res://art/seals/seal_boil.png"},
+		"body_part": "右手",
+		"skill": {
+			"kind": "aoe",
+			"range": 120.0,
+			"radius": 80.0,
+			"cooldown": 2.6,
+			"power": 2.0,
+			"status": {"name": "blind", "time": 3.0},
+		},
+	},
+	"泥沼印": {
+		"tags": ["水", "土"],
+		"shape": "mire",
+		"rank": 2,
+		"fusion_only": true,
+		"recipe": ["云雨印", "碎石印"],
+		"base": {"stat": "hp_max", "value": 20},
+		"activate": 20.0,
+		"drain": 0.0,
+		"life": "instant",
+		"seal_hp_max": 65.0,
+		"passive": "damage_taken",
+		"passive_value": 0.88,
+		"radius": 12.0,
+		"color": Color(0.48, 0.56, 0.42),
+		"visual": {"texture": "res://art/seals/seal_mire.png"},
+		"body_part": "周身",
+		"skill": {
+			"kind": "aoe",
+			"range": 110.0,
+			"radius": 100.0,
+			"cooldown": 3.2,
+			"power": 0.5,
+			"status": {"name": "slow", "time": 4.0},
+			## 「禁闪避」：泥泞里站不住 —— 敌人不能用它的位移技。
+			"no_dodge": true,
+		},
+	},
+	"熔岩印": {
+		"tags": ["火", "岩"],
+		"shape": "lava",
+		"rank": 3,
+		"fusion_only": true,
+		"recipe": ["灰烬印", "碎石印"],
+		"base": {"stat": "attack_damage", "value": 8},
+		"activate": 34.0,
+		"drain": 0.0,
+		"life": "instant",
+		"seal_hp_max": 75.0,
+		"passive": "attack_damage",
+		"passive_value": 7.0,
+		"radius": 14.0,
+		"color": Color(0.92, 0.44, 0.22),
+		"visual": {"texture": "res://art/seals/seal_lava.png"},
+		"body_part": "右手",
+		"skill": {
+			"kind": "aoe",
+			"range": 140.0,
+			"radius": 88.0,
+			"cooldown": 3.6,
+			"power": 4.0,
+			"status": {"name": "burn", "time": 3.0},
+			"knockback": 90.0,
+		},
+	},
+	"金刚印": {
+		"tags": ["岩", "守"],
+		"shape": "vajra",
+		"rank": 3,
+		"fusion_only": true,
+		"recipe": ["玄甲印", "碎石印"],
+		"base": {"stat": "hp_max", "value": 32},
+		"activate": 26.0,
+		"drain": 0.0,
+		"life": "timed",
+		"life_time": 6.0,
+		"seal_hp_max": 95.0,
+		"passive": "damage_taken",
+		"passive_value": 0.78,
+		"radius": 15.0,
+		"color": Color(0.78, 0.72, 0.46),
+		"visual": {"texture": "res://art/seals/seal_vajra.png"},
+		"body_part": "周身",
+		"skill": {
+			"kind": "shield",
+			"range": 0.0,
+			"amount": 80.0,                   # 巨额盾：磐石 30 / 辉光 45 / 金刚 80
+			## 「免疫击退」：护盾期间不被推走（Game 侧在击退处读它）。
+			"no_knockback": true,
+		},
+	},
 }
+
+# ==================== 融合 · 横向（数值设计 v2 §3.2）====================
+## ⭐ 一句话：**升级是纵向变强（同一件事做得更好），融合是横向变强（多做一件别的事）**
+##    —— 用户定案的原话。所以融合**不改**主印的名字 / 主动 / rank / tags，
+##    它只把副印的 `base` 打折成一条「融词条」挂上去。
+## ⚠️ 上限 = 主印 rank 条词条。这是「横向不能无限宽」的唯一刹车 ——
+##    没有它，一枚 1 等印可以把全世界的印都融进来，等级就失去意义了。
+const FUSION := {
+	"success": 0.85,         # 85%。失败：副印毁、主印无损、灵力不退
+	"affix_ratio": 0.5,      # 副印 base × 50%
+	"cost_per_rank": 80.0,   # 灵力成本 = 主印 rank × 80
+}
+
+## 融合产出一条「融词条」长什么样。
+## ⚠️ 值按 `affix_ratio` 打折，但 **`attack_cooldown` 这种乘算属性不能直接乘 0.5** ——
+##    0.9 × 0.5 = 0.45 会把冷却砍一半，那比原印本身还强。乘算属性走「往 1.0 靠一半」。
+static func fusion_affix(sub_name: String) -> Dictionary:
+	var sub: Dictionary = SEALS.get(sub_name, {})
+	var b: Dictionary = sub.get("base", {})
+	if b.is_empty():
+		return {}
+	var stat := str(b.get("stat", ""))
+	var raw := float(b.get("value", 0.0))
+	var val := raw
+	if stat == "attack_cooldown" or stat == "damage_mult":
+		val = 1.0 + (raw - 1.0) * float(FUSION["affix_ratio"])
+	else:
+		val = raw * float(FUSION["affix_ratio"])
+	return {"stat": stat, "value": val, "from": sub_name, "kind": "fusion"}
+
+
+## 一枚印最多能有几条融词条 = 它的等级（§3.2 上限）。
+static func fusion_limit(rank: int) -> int:
+	return maxi(1, rank)
+
+
+## 融合一次要多少灵力 = 主印 rank × 80。
+static func fusion_cost(rank: int) -> float:
+	return float(FUSION["cost_per_rank"]) * float(maxi(1, rank))
+
+
+## 两枚印能不能融：不能同种、副印必须在表里、副印不能是组合印（组合印不能再被吃）。
+static func can_fuse(main_name: String, sub_name: String) -> Dictionary:
+	if not SEALS.has(main_name) or not SEALS.has(sub_name):
+		return {"ok": false, "reason": "印不存在"}
+	if main_name == sub_name:
+		return {"ok": false, "reason": "不能拿自己当副印"}
+	if bool(SEALS[sub_name].get("fusion_only", false)):
+		return {"ok": false, "reason": "组合印不能再当副印被吸收"}
+	if (SEALS[sub_name].get("base", {}) as Dictionary).is_empty():
+		return {"ok": false, "reason": "这枚印没有可吸收的属性"}
+	return {"ok": true, "reason": ""}
+
+
+## 配方 → 组合印。⭐ 无序匹配（`combo_key` 同一个规矩），加配方只加数据。
+static func fusion_result(a: String, b: String) -> String:
+	var key := combo_key(a, b)
+	for name_key in SEALS.keys():
+		var s: Dictionary = SEALS[name_key]
+		if not bool(s.get("fusion_only", false)):
+			continue
+		var rec: Array = s.get("recipe", [])
+		if rec.size() != 2:
+			continue
+		if combo_key(str(rec[0]), str(rec[1])) == key:
+			return str(name_key)
+	return ""
+
+
+# ==================== 升级 · 纵向（数值设计 v2 §3.4）====================
+## ⭐ 升级 = **纵向变强**：「保留一个主印的特征」，只把它的数字往上抬。
+##    四条门槛缺一不可：境界 ≥ 目标 rank / 炼化满 100 / 天材地宝 / 环境匹配
+##    —— 门槛的判定在 Player 侧（它才知道玩家的境界与背包）。
+## ⚠️ 这里只放**数值**：倍率、成功率、反噬比例。别把判定写进数据表。
+const UPGRADE := {
+	"active_mult": 1.4,      # 主动 ×1.4
+	"passive_mult": 1.5,     # 被动 ×1.5
+	"seal_hp_mult": 1.3,     # 印体 ×1.3
+	"activate_mult": 0.9,    # activate −10%
+	"base_chance": 0.30,     # 30% 起
+	"per_fodder": 0.20,      # 每枚同名祭品 +20%
+	"fodder_max": 3,         # 最多 3 枚 → 最高 90%
+	"fail_hp_cap": 0.10,     # 失败：雷劫反噬气血上限 −10%
+}
+
+## 破阶成功率（含祭品加成）。`fodder` = 投入的同名祭品枚数。
+static func upgrade_chance(fodder: int) -> float:
+	var n := clampi(fodder, 0, int(UPGRADE["fodder_max"]))
+	return clampf(float(UPGRADE["base_chance"]) + float(UPGRADE["per_fodder"]) * float(n), 0.0, 0.9)
+
+
+# ==================== 变异（数值设计 v2 §3.3）====================
+## ⭐ 变异 = **印上的一条词条**（不是独立印种）—— §3.3.5 定案。
+##    所以它可以：「直接获得 / 当主印继续融合 / 当副印被吸收（只贡献属性）/ 升级后保留」。
+## ⚠️ 每枚印最多 1 条变异词条（不能叠 2 条前缀）。
+const MUTATION := {
+	"max_per_seal": 1,
+	"damage_mult": 1.5,       # 三大质变统一：伤害 ×1.5
+	## 四条**自己触发**的途径（第 ⑤ 条是「直接获得」，不需要概率）
+	"routes": {
+		"fusion":        {"chance": 0.05, "label": "融合变异"},
+		"fusion_attune": {"chance": 0.15, "label": "融合变异（触媒契合）"},
+		"env":           {"chance": 0.20, "label": "环境变异"},
+		"devour":        {"chance": 0.30, "label": "吞噬变异"},
+		"life_death":    {"chance": 0.02, "label": "生死变异"},
+	},
+	## 吞噬变异会**降低**破阶成功率（§3.3.1 ③）
+	"devour_penalty": 0.15,
+	## 变异词条表。`tags` = 给这枚印额外挂上的标签（弱点判定会读它）。
+	"affixes": {
+		"灼烧":   {"kind": "word", "tags": ["火"], "desc": "火伤 + 禁疗", "heal_block": true},
+		"霜冻":   {"kind": "word", "tags": ["冰"], "desc": "冰伤 + 冰冻", "stun": 0.8},
+		"穿甲":   {"kind": "word", "tags": ["穿"], "desc": "无视 50% 物防", "damage_mult": 1.5},
+		"致盲":   {"kind": "word", "tags": ["光"], "desc": "致盲范围 ×2", "blind_mult": 2.0},
+		"迷幻":   {"kind": "word", "tags": ["幻"], "desc": "泥沼敌人见幻影", "illusion": true},
+		"连锁雷": {"kind": "form", "tags": ["雷"], "desc": "雷电弹射 3 次、200px", "chain": 3, "chain_range": 200.0},
+		"环身火": {"kind": "form", "tags": ["火"], "desc": "以自身为圆心环爆", "ring": true},
+		"轻灵风": {"kind": "aura", "tags": ["风"], "desc": "闪避不耗体力", "free_dodge": true},
+	},
+}
+
+## 某个变异途径的概率。`attuned` 只对 `fusion` 有意义（触媒与主副印属性契合）。
+static func mutation_chance(route: String, attuned := false) -> float:
+	var r: Dictionary = MUTATION["routes"]
+	if route == "fusion" and attuned:
+		route = "fusion_attune"
+	if not r.has(route):
+		return 0.0
+	return float(r[route]["chance"])
+
+
+## 一条变异词条的全部数据（找不到就返回 {}）。
+static func mutation_affix(name_key: String) -> Dictionary:
+	return (MUTATION["affixes"] as Dictionary).get(name_key, {})
+
+
+## 这张表还算数吗（自测用：守的是「每条词条都有 kind / tags / desc」）。
+static func mutations_well_formed() -> bool:
+	for k in (MUTATION["affixes"] as Dictionary).keys():
+		var a: Dictionary = MUTATION["affixes"][k]
+		if not (a.has("kind") and a.has("tags") and a.has("desc")):
+			return false
+		if (a["tags"] as Array).is_empty():
+			return false
+	for k2 in (MUTATION["routes"] as Dictionary).keys():
+		var p := float(MUTATION["routes"][k2]["chance"])
+		if p <= 0.0 or p > 1.0:
+			return false
+	return true
+
 
 ## 开局命窍里的**两枚**印，顺序 = 数字键 1 / 2。
 ## ⭐ 只剩两枚是刻意的：惊雷印 / 磐石印改为**世界获得**（两只精英各掉一枚），
@@ -1038,6 +1422,26 @@ const MATERIALS := {
 	##    （商人货架的意义是"救急"，不是"毕业装备商店"。）
 	"玄霜髓": {"kind": "触媒", "color": Color(0.62, 0.86, 0.95), "price": 60, "volume": 3, "refine": 24},
 	"太虚核": {"kind": "触媒", "color": Color(0.90, 0.80, 0.45), "price": 70, "volume": 3, "refine": 30},
+
+	# ---- 以下按《数值设计》v2 §5 / §6 / §7 新增（苍梧山怪物带来的材料线）----
+	## ⭐ 一般材料：每一样都有**写死的出处**（ENEMY[*].drops），不做随机掉率 ——
+	##    和原来那条「固定数量、不做概率」的纪律同一条。
+	##    ⇒ 「我缺蛇胆 → 去打竹叶青」是玩家能自己推出来的信息，而不是抽奖。
+	"蛇胆":     {"kind": "兽材", "color": Color(0.42, 0.66, 0.36), "price": 8, "volume": 2, "refine": 4},
+	"灵木":     {"kind": "草木", "color": Color(0.58, 0.50, 0.34), "price": 7, "volume": 1, "refine": 4},
+	"幽魂精髓": {"kind": "触媒", "color": Color(0.55, 0.62, 0.72), "price": 35, "volume": 3, "refine": 12},
+	## ⭐ 稀有触媒（§3.3.1 / §5）：融合变异的**唯一钥匙** —— 基础 5%，属性契合 15%。
+	##    ⚠️ 它们是「门」不是「数值」：本身不提供任何战力，只把那条 5% 的缝推开。
+	##    所以价格定在 130~160 这一档（比地火芯 40 / 雷髓 45 贵三倍）—— 一次变异值得攒一阵子。
+	"百年蛇胆":   {"kind": "触媒", "color": Color(0.28, 0.52, 0.30), "price": 140, "volume": 3, "refine": 20},
+	"天雷木":     {"kind": "触媒", "color": Color(0.66, 0.50, 0.90), "price": 150, "volume": 3, "refine": 22},
+	"百年竹心草": {"kind": "触媒", "color": Color(0.38, 0.78, 0.45), "price": 130, "volume": 3, "refine": 20},
+	"灵狐内丹":   {"kind": "触媒", "color": Color(0.95, 0.66, 0.30), "price": 160, "volume": 3, "refine": 24},
+	## ⭐ 残片（§5 掉落阶梯）：**跨怪种收集**，所以它不属于任何一只怪 —— 谁都会掉，
+	##    攒够 10 片就能凝成一枚完整的印。这是「打了很多怪但一直没掉印」的保底。
+	"凡印残片": {"kind": "残片", "color": Color(0.68, 0.68, 0.70), "price": 12, "volume": 1, "refine": 1},
+	"精印残片": {"kind": "残片", "color": Color(0.55, 0.66, 0.88), "price": 30, "volume": 1, "refine": 2},
+	"通印残片": {"kind": "残片", "color": Color(0.75, 0.58, 0.90), "price": 70, "volume": 1, "refine": 3},
 }
 
 ## ⭐ M31.4：**材料表条目齐全**（守语义，不守个数）。
@@ -1062,7 +1466,37 @@ static func materials_well_formed() -> bool:
 ## 所以 `materials_well_formed()` 顺手查这张表 —— 加新材料时如果写错类别会被抓到。
 ## ⭐ 类别同时决定**手感**：草木轻（1）/ 兽材中（2）/ 矿石与触媒沉（3），
 ##    于是「值钱但占地方」与「便宜但好带」同时存在，出门带什么才是个选择。
-const KIND_VOLUME := {"草木": 1, "兽材": 2, "矿石": 3, "触媒": 3}
+const KIND_VOLUME := {"草木": 1, "兽材": 2, "矿石": 3, "触媒": 3, "残片": 1}
+
+## ⭐ 凝结表（§5）：**10 片残片 + 灵力 → 一枚完整的印**。
+##    为什么要有它：残片是「打了很久但一枚印都没掉」的保底进度条 ——
+##    没有它，掉落全靠运气；有了它，每一只杂怪都在往同一个目标上加一格。
+## ⚠️ `shard` 是能凝出的**印名**（不是品阶）：1 等残片只能凝出凡印。
+##    表里写印名而不是写 rank，是因为「哪枚印」将来可能要按流派分，而 rank 分不出来。
+const SHARDS := {
+	"凡印残片": {"rank": 1, "count": 10, "essence": 30.0, "shard": "落叶印"},
+	"精印残片": {"rank": 2, "count": 10, "essence": 60.0, "shard": "碎石印"},
+	"通印残片": {"rank": 3, "count": 10, "essence": 90.0, "shard": "熔岩印"},
+}
+
+
+## 残片表的体检（和 `materials_well_formed()` 同一条思路：守语义，不守个数）。
+## ⚠️ 三条硬要求：① 残片本身在材料表里 ② 目标印在灵印表里且品阶对得上 ③ 数字都是正的。
+static func shards_well_formed() -> bool:
+	for k in SHARDS.keys():
+		var s: Dictionary = SHARDS[k]
+		if not MATERIALS.has(k):
+			return false
+		if not (s.has("rank") and s.has("count") and s.has("essence") and s.has("shard")):
+			return false
+		if int(s["count"]) <= 0 or float(s["essence"]) < 0.0:
+			return false
+		var target := str(s["shard"])
+		if not SEALS.has(target):
+			return false
+		if int(SEALS[target]["rank"]) != int(s["rank"]):
+			return false
+	return true
 
 ## 商人（M14）。⭐ 待决问题 10 的落地：**一个**商人、放在世界中心锚点旁（安全区）、
 ## **货架一次性、不补货** —— 想买东西就得先出门把灵石赚回来。
@@ -1112,12 +1546,26 @@ const PICKUP := {
 
 ## 掉落表：按敌人原型。⭐ 固定数量，不做随机掉率 ——
 ## 随机掉率会让自测变成概率游戏，等有调参台了再上权重。
+##
+## ⚠️⚠️ M35（数值设计 v2 §0 第二条锚点）：**普通怪不掉灵石**。
+##    旧表里 猛兽 3 / 智谋 5 / 灵师 8 / 蛮兽 6 全被删掉了 —— 那让「灵石」贬值成了
+##    打杂怪就能刷的日用品，而设计里它是**硬通货**，来源只有精英 5~8、首领 20~30（§7）。
+##    ⇒ 现在灵石只从两处来：① `ENEMY[*].stone`（自成一档的精英）
+##                          ② `ELITE.stone`（同一原型被加档的精英）
+##    这条有断言盯着（见 Game.gd 的自测「普通怪不掉灵石」那一条）——
+##    谁再往杂怪表里塞灵石，自测会红。
 const ENEMY_DROPS := {
-	"猛兽": {"兽骨": 2, "灵石": 3},
-	"智谋": {"兽骨": 1, "灵魄": 1, "灵石": 5},
-	"灵师": {"灵魄": 2, "灵石": 8},        # 它身上那枚印另外掉（走 carries）
-	"蛮兽": {"兽骨": 2, "灵魄": 1, "灵石": 6},
-	# ⭐ 精英的掉落 = 原型掉落 × drop_mult，再额外给一份 bonus_drop（见 Game._drop_loot）
+	"猛兽": {"兽骨": 2},
+	"智谋": {"兽骨": 1, "灵魄": 1},
+	"灵师": {"灵魄": 2},        # 它身上那枚印另外掉（走 carries）
+	"蛮兽": {"兽骨": 2, "灵魄": 1},
+	## ---- 苍梧山 ----
+	"铁齿竹鼠": {"兽骨": 2},
+	"鬼影竹叶青": {"蛇胆": 1},
+	"青木竹妖": {"灵木": 2},
+	"碧眼灵狐": {"灵魄": 2},     # + 灵石 5（在 ENEMY 表的 stone 字段里）
+	"变异矿鬼": {"幽魂精髓": 1},  # + 灵石 6
+	# ⭐ 精英的掉落 = 原型掉落 × drop_mult，再额外给一份 bonus_drop + 灵石（见 Game._drop_loot）
 }
 
 
@@ -1288,6 +1736,17 @@ const ART_ID := {
 	"玄霜髓": "frost",
 	"太虚核": "voidcore",
 	"灵石": "stone",
+	## ---- 苍梧山材料线（M35）----
+	"蛇胆": "gallsac",
+	"灵木": "spiritwood",
+	"幽魂精髓": "ghostess",
+	"百年蛇胆": "gallold",
+	"天雷木": "thunderwood",
+	"百年竹心草": "bambooherb",
+	"灵狐内丹": "foxcore",
+	"凡印残片": "shard_common",
+	"精印残片": "shard_fine",
+	"通印残片": "shard_master",
 }
 
 
@@ -1338,17 +1797,36 @@ const SHAPES := {
 	"hunter": "square",
 	"caster": "diamond",
 	"charger": "triangle",
+	## ---- 苍梧山五种怪（数值设计 v2 §6）----
+	## ⚠️ 「一眼分辨」在这里是**功能**不是审美：玩家必须能在半秒内看出
+	##    「这只可以放着不管（竹鼠中立）/ 这只贴脸就死（竹叶青伏击）」。
+	"burrow": "hexagon",
+	"ambush": "snake",
+	"disguise": "bamboo",
+	"clone": "fox",
+	"phase": "ghost",
 }
 
 ## 精英规格。⭐ 精英不是新原型，是**同一个原型加档** ——
 ## 所以同一个 AI、同一个形状，只是更大更硬更疼，掉得也更多。
+## ⚠️ M35：`stone` = 灵石（设计 §0 第二条锚点：**普通怪不掉灵石**，只有精英与首领掉）。
 const ELITE := {
 	"hp_mult": 3.0,
 	"damage_mult": 1.5,
 	"radius_mult": 1.35,
 	"drop_mult": 3,
 	"bonus_drop": "灵魄",     # 精英额外掉的高级辅材
+	"stone": 6,               # 精英的灵石（设计 §5：5~8 这一档，固定 6 = 不做概率）
+	"shard": "精印残片",       # 精英的残碎片种
+	"shard_count": 2,
 }
+
+## 普通怪掉的残片（设计 §5：普通怪 → 凡印残片）。
+## ⚠️ 设计原文写的是「60% 概率」，这里**改成必掉** —— 理由是工程既有的纪律：
+##    「固定数量，不做随机掉率」（见 ENEMY_DROPS 抬头）。随机掉率会让自测变成概率游戏，
+##    而残片本来就是「打了很久但一直没掉印」的保底进度条 —— 保底还要掷骰子就不叫保底了。
+##    ⇒ 等有调参台了再按 §5 上权重。
+const MOB_SHARD := {"shard": "凡印残片", "count": 1}
 
 const ENEMY := {
 	"猛兽": {
@@ -1412,6 +1890,123 @@ const ENEMY := {
 		"attack_damage": 7.0,
 		"attack_cooldown": 1.30,
 		"seal_seek_chance": 0.30,  # 30% 概率改打显化中的灵印
+	},
+	# ==================== 苍梧山（数值设计 v2 §6）====================
+	## ⭐ 五种怪的数值**完全照抄设计表**（hp / 攻击 / 特色 / 弱点 / 掉落）。
+	##    新增的三个字段是这一版的核心：
+	##      · `weakness` = {标签: 倍率} —— 打标签对得上就吃倍率。**这是「弱点」第一次真的存在**。
+	##        旧的四种原型没有这一项（= 什么都不弱），所以旧战斗手感一点没变。
+	##      · `drops`    = 这只怪自己掉什么（覆盖 ENEMY_DROPS）。
+	##      · `self_elite` = **它本来就是精英**（不是「杂怪加档」）。
+	##        ⇒ `ELITE.hp_mult ×3` **不套用在它身上**：设计给的 220 就是最终血量。
+	##          踩过的坑：第一版让所有 elite 都 ×3，灵狐直接变 660 血，一个新手村首领都没它硬。
+	"铁齿竹鼠": {
+		"behavior": "burrow",
+		"hp_max": 50.0,
+		"radius": 14.0,
+		"color": Color(0.72, 0.58, 0.38),
+		"speed": 46.0,
+		"aggro_range": 120.0,
+		"attack_range": 20.0,
+		"attack_damage": 6.0,
+		"attack_cooldown": 1.20,
+		"seal_seek_chance": 0.0,
+		## 中立：不进仇恨圈就当你不在。踩到它的窝（`nest_range`）才会翻脸。
+		"neutral": true,
+		"nest_range": 90.0,
+		## 冲锋：和蛮兽同一套「蓄力 → 锁方向 → 撞」，但距离更短、更快、更弱。
+		"charge_range": 130.0,
+		"charge_warn": 0.40,
+		"charge_speed": 300.0,
+		"charge_time": 0.26,
+		## 流血：撞上之后挂一条持续伤害（比灼烧慢、但更久）
+		"bleed": {"damage": 2.0, "tick": 0.5, "time": 4.0},
+		"weakness": {"火": 2.0},
+		"drops": {"兽骨": 2},
+	},
+	"鬼影竹叶青": {
+		"behavior": "ambush",
+		"hp_max": 40.0,
+		"radius": 13.0,
+		"color": Color(0.34, 0.56, 0.30),
+		"speed": 58.0,
+		"aggro_range": 92.0,
+		"attack_range": 19.0,
+		"attack_damage": 12.0,
+		"attack_cooldown": 1.60,
+		"seal_seek_chance": 0.0,
+		## 伏击：平时缩在草丛里（半透明、不追人）；进 `ambush_range` 就扑一下，
+		## 那一下**打完就退回去** —— 所以它是一道「你会不会被咬到」的反应题，不是一根木桩。
+		"ambush_range": 105.0,
+		"ambush_mult": 1.5,
+		## 剧毒：一击附加持续伤害（design §6「12（剧毒）」）
+		"poison": {"damage": 3.0, "tick": 0.6, "time": 5.0},
+		"weakness": {"火": 1.5},
+		"drops": {"蛇胆": 1},
+	},
+	"青木竹妖": {
+		"behavior": "disguise",
+		"hp_max": 90.0,
+		"radius": 18.0,
+		"color": Color(0.44, 0.66, 0.34),
+		"speed": 32.0,
+		"aggro_range": 150.0,
+		"attack_range": 26.0,
+		"attack_damage": 8.0,
+		"attack_cooldown": 1.80,
+		"seal_seek_chance": 0.15,
+		## 伪装：站着不动时就是一根枯竹（画成竹子、不 bob、不显示血条）。
+		## 进 `reveal_range` 才现形 —— 玩家第一次会被它吓一跳，第二次就会拿火去烧竹子。
+		"disguise_reveal": 110.0,
+		## 藤蔓控制：命中后把主角钉住一会儿（`root_time` 秒内不能移动）。
+		"root_time": 0.7,
+		"weakness": {"火": 1.5},
+		"drops": {"灵木": 2},
+	},
+	## ⭐ 精英 1：碧眼灵狐 —— 分身 ×3（1 真 2 假）。**强光破**（辉光印 tag 光）。
+	"碧眼灵狐": {
+		"behavior": "clone",
+		"self_elite": true,
+		"hp_max": 220.0,
+		"radius": 19.0,
+		"color": Color(0.42, 0.78, 0.72),
+		"speed": 62.0,
+		"aggro_range": 180.0,
+		"attack_range": 24.0,
+		"attack_damage": 10.0,
+		"attack_cooldown": 1.40,
+		"seal_seek_chance": 0.20,
+		## 分身：本体 + 2 个幻影。幻影不痛、但会骗走你的普攻和灵印锁定。
+		## ⭐ 强光破的**机制**就在这里：辉光印（tag 光）一照，幻影直接散掉。
+		"clone_count": 2,
+		"clone_hp_ratio": 0.01,     # 幻影一碰就碎（1% 血）
+		"clone_damage_ratio": 0.0,  # 幻影打人不掉血 —— 它只是骗你，不是第二个 boss
+		"weakness": {"光": 1.5, "雷": 1.2},
+		"drops": {"灵魄": 2},
+		"stone": 5,
+	},
+	## ⭐ 精英 2：变异矿鬼 —— 半透明穿墙、打你时吸灵力。**强光**。
+	"变异矿鬼": {
+		"behavior": "phase",
+		"self_elite": true,
+		"hp_max": 150.0,
+		"radius": 16.0,
+		"color": Color(0.46, 0.54, 0.62),
+		"speed": 54.0,
+		"aggro_range": 190.0,
+		"attack_range": 22.0,
+		"attack_damage": 10.0,
+		"attack_cooldown": 1.50,
+		"seal_seek_chance": 0.25,
+		## 穿墙：`can_step` 对它恒为真 ⇒ 它会从石头里直接穿过来。这是它的身份，不是 bug。
+		"phase": true,
+		## 吸灵力：每次命中额外抽走主角 `essence_drain` 点灵力。
+		"essence_drain": 6.0,
+		## 灵体：一半时间半透明（`ghost_period` 秒一轮），视觉上"你打不实"。
+		"ghost_period": 2.4,
+		"weakness": {"光": 1.5},
+		"drops": {"幽魂精髓": 1},
+		"stone": 6,
 	},
 }
 
@@ -1524,6 +2119,31 @@ const ENEMY_SPAWNS := [
 	##    ⭐⭐ 同样实测为 **L3**（ρ = max(1392/1792, 1168/1536) = max(0.7768, 0.7604) = **0.7768**）。
 	##    实测：格 (12,84) R=150 G=166 **B=0**（灵岩，非深水、干地），可达。
 	{"id": "e13", "archetype": "蛮兽", "pos": Vector2(400.0, 2704.0),   "ring": 3, "carries": "磐石印", "elite": true},
+
+	## ---- ⭐⭐ M35：苍梧山五种怪（n01…n12，数值设计 v2 §6）----
+	##    ⚠️ **必须追加在数组末尾**：`enemies[0]` / `enemies[1]` 被 `Game.gd` 多处按
+	##       下标取（猛兽 / 智谋），挪位置就会串味。
+	##    ⚠️ 坐标是 `tests/probe_spawns.gd` **搜出来的**，不是拍脑袋写的。那个脚本按
+	##       `world_data_test.gd` 第 6/7 段的同一套条件筛：非深水 / 不在主城 / 离商人
+	##       与出生点 ≥400px / 离已有怪 ≥200px / 彼此 ≥220px，再用最远点采样铺开。
+	##       ⇒ 要加新怪，改那个脚本重跑，别手写坐标。
+	##    `terrain` 只是**记录**（供人读），判定读的是烘出来的 worldmap。
+	## ---- 铁齿竹鼠（中立 → 踩窝才翻脸 → 冲锋 + 流血）----
+	{"id": "n01", "archetype": "铁齿竹鼠", "pos": Vector2(2128.0, 1008.0), "ring": 1},
+	{"id": "n02", "archetype": "铁齿竹鼠", "pos": Vector2(2320.0, 1712.0), "ring": 1},
+	{"id": "n03", "archetype": "铁齿竹鼠", "pos": Vector2(2832.0, 1840.0), "ring": 2},
+	{"id": "n04", "archetype": "铁齿竹鼠", "pos": Vector2(432.0, 1872.0),  "ring": 3},
+	## ---- 鬼影竹叶青（草丛伏击，一击带剧毒）----
+	{"id": "n05", "archetype": "鬼影竹叶青", "pos": Vector2(1264.0, 1328.0), "ring": 1},
+	{"id": "n06", "archetype": "鬼影竹叶青", "pos": Vector2(592.0, 1424.0),  "ring": 2},
+	{"id": "n07", "archetype": "鬼影竹叶青", "pos": Vector2(2800.0, 1200.0), "ring": 2},
+	## ---- 青木竹妖（伪装枯竹，现形后用藤蔓钉住你）----
+	{"id": "n08", "archetype": "青木竹妖", "pos": Vector2(2064.0, 560.0),  "ring": 2},
+	{"id": "n09", "archetype": "青木竹妖", "pos": Vector2(144.0, 1968.0),  "ring": 4},
+	{"id": "n10", "archetype": "青木竹妖", "pos": Vector2(656.0, 432.0),   "ring": 3},
+	## ---- ⭐ 两只**自成一档**的精英（`self_elite`：血量就是设计值，不再 ×3）----
+	{"id": "n11", "archetype": "碧眼灵狐", "pos": Vector2(2320.0, 1328.0), "ring": 1, "elite": true},
+	{"id": "n12", "archetype": "变异矿鬼", "pos": Vector2(2992.0, 1520.0), "ring": 2, "elite": true},
 ]
 
 

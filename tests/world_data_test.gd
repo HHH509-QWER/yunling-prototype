@@ -289,7 +289,7 @@ func _t7_seals() -> void:
 	for m in GameData.ENEMY_SPAWNS:
 		if bool(m.get("elite", false)):
 			elites += 1
-	_check("精英正好 2 只（e12 惊雷 / e13 磐石）", elites == 2, "实际 %d 只" % elites)
+	_check("精英正好 4 只（2 加档 e12/e13 + 2 自成一档 n11/n12）", elites == 4, "实际 %d 只" % elites)
 	var casters := 0
 	for m in GameData.ENEMY_SPAWNS:
 		if str(m["archetype"]) == "灵师":
@@ -299,7 +299,9 @@ func _t7_seals() -> void:
 			str(GameData.ENEMY_SPAWNS[0]["archetype"]) == "猛兽"
 			and str(GameData.ENEMY_SPAWNS[1]["archetype"]) == "智谋",
 			"%s / %s" % [str(GameData.ENEMY_SPAWNS[0]["archetype"]), str(GameData.ENEMY_SPAWNS[1]["archetype"])])
-	_check("刷怪表总数为 67（62 杂怪 + 5 带印）", GameData.ENEMY_SPAWNS.size() == 67,
+	## ⚠️ M35：62 杂怪 + 5 带印 + **12 只苍梧山怪**（n01…n12）= 79。
+	##    数字写死在这里是**有意的**：刷怪表是「世界内容清单」，多一只少一只都该被人看见。
+	_check("刷怪表总数为 79（62 杂怪 + 5 带印 + 12 苍梧山）", GameData.ENEMY_SPAWNS.size() == 79,
 			"实际 %d" % GameData.ENEMY_SPAWNS.size())
 
 	# ⭐ 印总账：灰烬（本命） + 秘境 6（含玄甲） + 传承强夺 5 + 印源 4 = 16

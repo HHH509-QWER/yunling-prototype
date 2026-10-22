@@ -620,6 +620,41 @@ func _shape_points(shape: String) -> PackedVector2Array:
 				var rad: float = 1.0 if k % 2 == 0 else 0.45
 				s.append(Vector2(cos(a2), sin(a2)) * rad)
 			return s
+		## ---- M35：新增八枚印的形状（§2.1 三枚基础印 + §2.2 五枚组合印）----
+		## ⚠️ 全部是**简单多边形**：`Geometry2D.triangulate_polygon` 对自交折线会失败，
+		##    失败之后那一块界面会停画（踩过：惊雷印第一版）。所以宁可朴素，不许自交。
+		"shard":
+			return PackedVector2Array([Vector2(0.0, -1.0), Vector2(0.62, -0.28),
+					Vector2(0.44, 0.92), Vector2(-0.46, 0.86), Vector2(-0.66, -0.26)])
+		"leaf2":
+			return PackedVector2Array([Vector2(-0.86, 0.78), Vector2(-0.34, -0.62),
+					Vector2(0.42, -0.96), Vector2(0.88, -0.30), Vector2(0.34, 0.60)])
+		"mud":
+			return PackedVector2Array([Vector2(-0.92, 0.34), Vector2(-0.62, -0.42),
+					Vector2(0.06, -0.70), Vector2(0.74, -0.36), Vector2(0.94, 0.30),
+					Vector2(0.38, 0.86), Vector2(-0.44, 0.84)])
+		"storm":
+			return PackedVector2Array([Vector2(-0.92, -0.10), Vector2(-0.56, -0.72),
+					Vector2(0.10, -0.88), Vector2(0.72, -0.52), Vector2(0.94, 0.04),
+					Vector2(0.50, 0.30), Vector2(-0.50, 0.30)])
+		"boil":
+			return PackedVector2Array([Vector2(-0.94, 0.82), Vector2(-0.62, -0.10),
+					Vector2(-0.12, -0.54), Vector2(0.46, -0.34), Vector2(0.92, 0.30),
+					Vector2(0.88, 0.84)])
+		"mire":
+			return PackedVector2Array([Vector2(0.0, -0.96), Vector2(0.70, -0.50),
+					Vector2(0.92, 0.24), Vector2(0.34, 0.92), Vector2(-0.40, 0.88),
+					Vector2(-0.92, 0.20), Vector2(-0.68, -0.56)])
+		"lava":
+			return PackedVector2Array([Vector2(0.0, -1.0), Vector2(0.78, -0.34),
+					Vector2(0.58, 0.72), Vector2(0.0, 0.98), Vector2(-0.58, 0.72),
+					Vector2(-0.78, -0.34)])
+		"vajra":
+			return PackedVector2Array([Vector2(-0.24, -0.98), Vector2(0.24, -0.98),
+					Vector2(0.24, -0.24), Vector2(0.98, -0.24), Vector2(0.98, 0.24),
+					Vector2(0.24, 0.24), Vector2(0.24, 0.98), Vector2(-0.24, 0.98),
+					Vector2(-0.24, 0.24), Vector2(-0.98, 0.24), Vector2(-0.98, -0.24),
+					Vector2(-0.24, -0.24)])
 	return PackedVector2Array([Vector2(-0.8, -0.8), Vector2(0.8, -0.8), Vector2(0.8, 0.8), Vector2(-0.8, 0.8)])
 
 

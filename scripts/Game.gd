@@ -130,7 +130,7 @@ var _fail_labels: Array = []
 ##    断言数本来就随代码增长而变。**锁死"恰好 584"是脆的**：谁加一条断言就红，谁删一条也红，
 ##    两种红长得一样，逼人去人工判断"是涨了还是跌了"—— 而人工判断正是会漏的环节。
 ##    所以只锁下界：只能涨不能跌。删断言 → 红；加断言 → 绿并打印实际值。
-const SELFTEST_MIN := 607
+const SELFTEST_MIN := 668
 ## 自测**有没有跑完**的标记（防假绿灯，见 `_selftest_finish()`）。
 var _st_started := false
 var _st_done := false
@@ -822,6 +822,13 @@ func _remove_enemy(e) -> void:
 
 
 func _on_enemy_died(e) -> void:
+	if not is_instance_valid(e):
+		return
+	## ⭐ M35：幻影死了**什么都不掉**（它是骗你的，不是真的奖励）——
+	##    否则灵狐的分身会变成刷灵魄的提款机。
+	if bool(e.get("is_phantom")):
+		_remove_enemy(e)
+		return
 	_drop_loot(e.position, str(e.archetype), e.elite)
 
 	if str(e.carries) != "":
@@ -950,20 +957,43 @@ func _mergeable_pickup(pos: Vector2, item: String):
 
 ## 敌人死了掉什么。⭐ 固定数量（表里写死的），不做随机掉率 ——
 ## 随机掉率会让自测变成概率游戏。
+##
+## ⭐⭐ M35 改版（数值设计 v2 §5 / §7）：
+##   ① **按怪下菜**：`ENEMY[*].drops` 优先（每只怪有自己的材料线），没写才回退旧表。
+##   ② **灵石只给精英**（§0 第二条锚点）：`ENEMY[*].stone` 或 `ELITE.stone`，普通怪**一分不掉**。
+##   ③ **残片人人有**：普通怪 1 片凡印、精英 2 片精印 —— 这是「打了很久没掉印」的保底进度条。
+##   ④ 被加档的精英仍然 ×drop_mult + 一份 bonus_drop（原行为保留）。
 func _drop_loot(pos: Vector2, archetype: String, elite := false) -> void:
-	var table: Dictionary = GameData.ENEMY_DROPS.get(archetype, {})
-	var mult := int(GameData.ELITE["drop_mult"]) if elite else 1
-	var total := maxf(float(table.size() + (1 if elite else 0)), 1.0)
-	var i := 0
+	var d: Dictionary = GameData.ENEMY.get(archetype, {})
+	var self_elite := bool(d.get("self_elite", false))
+	var table: Dictionary = d.get("drops", GameData.ENEMY_DROPS.get(archetype, {}))
+	# ⚠️ 「自成一档」的精英血量与掉落都是设计值，不再 ×3 —— 否则灵狐一次掉 6 个灵魄。
+	var mult := int(GameData.ELITE["drop_mult"]) if (elite and not self_elite) else 1
+	var items: Array = []
 	for item in table:
+		items.append({"item": str(item), "count": int(table[item]) * mult})
+	# 残片
+	if elite:
+		items.append({"item": str(GameData.ELITE["shard"]), "count": int(GameData.ELITE["shard_count"])})
+	else:
+		items.append({"item": str(GameData.MOB_SHARD["shard"]), "count": int(GameData.MOB_SHARD["count"])})
+	# 灵石：只有精英掉。自带 stone 的按自己的数，被加档的按 ELITE.stone。
+	var stone := int(d.get("stone", 0))
+	if stone > 0:
+		items.append({"item": str(GameData.CURRENCY), "count": stone})
+	elif elite and not self_elite:
+		items.append({"item": str(GameData.CURRENCY), "count": int(GameData.ELITE["stone"])})
+	# 被加档的精英额外掉一份高级辅材 —— 「打硬的仗有额外回报」
+	if elite and not self_elite:
+		items.append({"item": str(GameData.ELITE["bonus_drop"]), "count": 1})
+
+	var total := maxf(float(items.size()), 1.0)
+	var i := 0
+	for it in items:
 		# 围着尸体摊开一圈，免得几件东西叠在同一个点上分不清
 		var off := Vector2(18.0, 0.0).rotated(TAU * float(i) / total)
-		_spawn_pickup(pos + off, str(item), int(table[item]) * mult)
+		_spawn_pickup(pos + off, str(it["item"]), int(it["count"]))
 		i += 1
-	# ⭐ 精英额外掉一份高级辅材 —— 「打硬的仗有额外回报」
-	if elite:
-		var off2 := Vector2(18.0, 0.0).rotated(TAU * float(table.size()) / total)
-		_spawn_pickup(pos + off2, str(GameData.ELITE["bonus_drop"]), 1)
 
 
 ## 飘字与震屏每帧收尾。
@@ -1399,23 +1429,25 @@ func execute_combo(key: String) -> int:
 		return 0
 	var d: Dictionary = GameData.COMBOS[key]
 	var hits := 0
+	## ⭐ M35：印诀也带标签 ⇒ 也吃弱点（见 GameData.combo_tags 的注释）。
+	var ctags: Array = GameData.combo_tags(key)
 	match str(d["kind"]):
 		"storm":
 			hits = _combo_aoe(player.position, float(d["radius"]), float(d["damage"]), key,
-					float(d.get("dot", 0.0)), float(d.get("dot_time", 0.0)))
+					float(d.get("dot", 0.0)), float(d.get("dot_time", 0.0)), ctags)
 			player.heal(float(d.get("heal", 0.0)))
 		"burst":
-			hits = _combo_aoe(player.position, float(d["radius"]), float(d["damage"]), key, 0.0, 0.0)
+			hits = _combo_aoe(player.position, float(d["radius"]), float(d["damage"]), key, 0.0, 0.0, ctags)
 		"pillar":
 			hits = _combo_aoe(player.position, float(d["radius"]), float(d["damage"]), key,
-					float(d.get("dot", 0.0)), float(d.get("dot_time", 0.0)))
+					float(d.get("dot", 0.0)), float(d.get("dot_time", 0.0)), ctags)
 		"firewall":
 			var dir: Vector2 = player.facing.normalized()
 			if dir == Vector2.ZERO:
 				dir = Vector2.RIGHT
 			hits = _combo_line(player.position, player.position + dir * float(d["length"]),
 					float(d["width"]), float(d["damage"]), key, float(d.get("dot", 0.0)),
-					float(d.get("dot_time", 0.0)), float(d.get("push", 0.0)), dir)
+					float(d.get("dot_time", 0.0)), float(d.get("push", 0.0)), dir, ctags)
 		"guard", "haste":
 			hits = 0            # 只给自己上增益 —— 那部分 Player 已经上了
 	if hud != null:
@@ -1426,14 +1458,14 @@ func execute_combo(key: String) -> int:
 ## 圆形范围伤害（雷雨交加 / 爆炎 / 引雷柱）。
 ## ⚠️ 遍历 duplicate()：take_damage 可能打死敌人，_on_enemy_died 会改 enemies。
 func _combo_aoe(center: Vector2, radius: float, damage: float, src: String,
-		dot_dmg: float, dot_time: float) -> int:
+		dot_dmg: float, dot_time: float, tags: Array = []) -> int:
 	var n := 0
 	for e in enemies.duplicate():
 		if not is_instance_valid(e) or not e.is_alive():
 			continue
 		if e.position.distance_to(center) > radius:
 			continue
-		e.take_damage(damage)
+		e.take_damage(damage, Color(0.95, 0.95, 0.92), true, tags)
 		n += 1
 		if dot_dmg > 0.0 and is_instance_valid(e) and e.is_alive():
 			e.add_dot(dot_dmg, dot_time, src, 0.5, Color(0.78, 0.70, 1.0))
@@ -1442,14 +1474,14 @@ func _combo_aoe(center: Vector2, radius: float, damage: float, src: String,
 
 ## 线段范围伤害（燎原 · 火墙）：判定 = 点到线段的距离。
 func _combo_line(from: Vector2, to: Vector2, width: float, damage: float, src: String,
-		dot_dmg: float, dot_time: float, push: float, dir: Vector2) -> int:
+		dot_dmg: float, dot_time: float, push: float, dir: Vector2, tags: Array = []) -> int:
 	var n := 0
 	for e in enemies.duplicate():
 		if not is_instance_valid(e) or not e.is_alive():
 			continue
 		if _dist_to_segment(e.position, from, to) > width:
 			continue
-		e.take_damage(damage)
+		e.take_damage(damage, Color(0.95, 0.95, 0.92), true, tags)
 		n += 1
 		if push > 0.0 and is_instance_valid(e):
 			e.position += dir * push
@@ -3342,7 +3374,18 @@ func _run_selftest_body() -> void:
 	# ==================== M11：怪物丰富与掉落 ====================
 	# ⭐ 验收：每种原型都有验收断言与掉落表；一眼能分辨原型。
 
-	_check("敌人有 4 种原型", GameData.ENEMY.size() == 4, "实际 %d 种" % GameData.ENEMY.size())
+	# ⭐ M35：原型从 4 种扩到 9 种（四种杂怪 + 苍梧山五怪）。
+	#    ⚠️ 断言从「等于 4」改成**守语义**（§材料表那条的老坑：写死数字 = 假绿灯源）：
+	#       只许增不许减，且每一只都必须字段齐全。
+	_check("敌人原型只增不减（≥4 种）", GameData.ENEMY.size() >= 4, "实际 %d 种" % GameData.ENEMY.size())
+	var enemy_bad: Array = []
+	for key in GameData.ENEMY:
+		var e: Dictionary = GameData.ENEMY[key]
+		for f in ["behavior", "hp_max", "radius", "speed", "aggro_range",
+				"attack_range", "attack_damage", "attack_cooldown", "seal_seek_chance"]:
+			if not e.has(f):
+				enemy_bad.append("%s 缺 %s" % [key, f])
+	_check("每种原型的必需字段齐全", enemy_bad.is_empty(), str(enemy_bad))
 	var shape_ok := true
 	for key in GameData.ENEMY:
 		var bh := str(GameData.ENEMY[key].get("behavior", ""))
@@ -3351,10 +3394,11 @@ func _run_selftest_body() -> void:
 	_check("每种原型都有 behavior，且都在形状表里", shape_ok, "有原型没形状")
 	var drop_ok := true
 	for key in GameData.ENEMY:
-		if not GameData.ENEMY_DROPS.has(str(key)):
+		if not (GameData.ENEMY_DROPS.has(str(key)) or GameData.ENEMY[key].has("drops")):
 			drop_ok = false
-	_check("每种原型都有掉落表", drop_ok, "有原型没掉落表")
-	_check("形状表有四种形状", GameData.SHAPES.size() == 4, "实际 %d 种" % GameData.SHAPES.size())
+	_check("每种原型都有掉落表（ENEMY_DROPS 或自己的 drops）", drop_ok, "有原型没掉落表")
+	_check("形状表只增不减（≥4 种形状）", GameData.SHAPES.size() >= 4,
+			"实际 %d 种" % GameData.SHAPES.size())
 
 	# 复位
 	for i in range(player.slot_summoned.size()):
@@ -3406,23 +3450,47 @@ func _run_selftest_body() -> void:
 	_check("横着闪开就不会被撞到（方向已锁定）",
 			is_equal_approx(player.hp, player.hp_max), "血 %.0f / %.0f" % [player.hp, player.hp_max])
 
-	# 2. 精英：同一套 AI，只是加档
+	# 2. 精英：两种来源，**必须分得清**（§6 的设计要求）
+	#    ① 加档精英（e12 / e13）：同一个原型 ×3 —— 同一个 AI、同一个形状，只是更大更硬
+	#    ② 自成一档的精英（碧眼灵狐 / 变异矿鬼）：血量就是设计值，**不再 ×3**
 	var elites: Array = []
+	var promoted: Array = []
+	var born: Array = []
 	for e in enemies:
-		if is_instance_valid(e) and e.elite:
-			elites.append(e)
-	_check("场上有 2 只精英", elites.size() == 2, "实际 %d 只" % elites.size())
-	var el = elites[0]
+		if not is_instance_valid(e) or not e.elite:
+			continue
+		elites.append(e)
+		if bool(e.self_elite):
+			born.append(e)
+		else:
+			promoted.append(e)
+	_check("场上有 4 只精英（2 加档 + 2 自成一档）",
+			elites.size() == 4 and promoted.size() == 2 and born.size() == 2,
+			"总 %d（加档 %d / 自成一档 %d）" % [elites.size(), promoted.size(), born.size()])
+	var el = promoted[0]
 	var base_hp := float(GameData.ENEMY[el.archetype]["hp_max"])
-	_check("精英血量 = 原型 × 3", is_equal_approx(el.hp_max, base_hp * 3.0),
+	_check("加档精英血量 = 原型 × 3", is_equal_approx(el.hp_max, base_hp * 3.0),
 			"%.0f（原型 %.0f）" % [el.hp_max, base_hp])
-	_check("精英体型更大", el.radius_value() > float(GameData.ENEMY[el.archetype]["radius"]),
+	_check("加档精英体型更大", el.radius_value() > float(GameData.ENEMY[el.archetype]["radius"]),
 			"%.1f" % el.radius_value())
-	_check("精英伤害更高", el.damage_value() > float(GameData.ENEMY[el.archetype]["attack_damage"]),
+	_check("加档精英伤害更高", el.damage_value() > float(GameData.ENEMY[el.archetype]["attack_damage"]),
 			"%.1f" % el.damage_value())
-	_check("精英用的还是同一个原型（不是新原型）", GameData.ENEMY.has(el.archetype), el.archetype)
+	_check("加档精英用的还是同一个原型（不是新原型）", GameData.ENEMY.has(el.archetype), el.archetype)
 
-	# 3. 精英掉落：原型 × drop_mult + 额外高级辅材
+	# ⭐ 自成一档的精英 = 设计表里的绝对数字（§6：灵狐 220 / 矿鬼 150）
+	var fox = null
+	for e2 in born:
+		if is_instance_valid(e2) and str(e2.archetype) == "碧眼灵狐":
+			fox = e2
+	_check("碧眼灵狐在场上", fox != null, "找不到")
+	if fox != null:
+		_check("自成一档的精英**不套 ×3**（灵狐血量就是 220）",
+				is_equal_approx(fox.hp_max, 220.0), "%.0f" % fox.hp_max)
+		_check("自成一档的精英体型就是设计值（不放大）",
+				is_equal_approx(fox.radius_value(), float(GameData.ENEMY["碧眼灵狐"]["radius"])),
+				"%.1f" % fox.radius_value())
+
+	# 3. 精英掉落：原型 × drop_mult + 额外高级辅材 + 灵石 + 精印残片
 	# ⚠️ M30.1：**按数量断言，不要按地上的节点数** —— 同类掉落物会就近并堆，
 	#    而 `ELITE.bonus_drop` 恰好就是「灵魄」，智谋的掉落表里本来也有灵魄：
 	#    同一次掉落里就有两件同名的（相距 36px < merge_radius）→ 并成一堆，节点数必然少于条目数。
@@ -3441,11 +3509,15 @@ func _run_selftest_body() -> void:
 		if is_instance_valid(pk):
 			var ik := str(pk.item)
 			drop_totals[ik] = int(drop_totals.get(ik, 0)) + int(pk.amount)
-	_check("精英掉落一件不少（原型 ×3）：兽骨 3 / 灵石 15",
-			int(drop_totals.get("兽骨", 0)) == 3 and int(drop_totals.get(GameData.CURRENCY, 0)) == 15,
+	_check("精英掉落一件不少（原型 ×3）：兽骨 3 / 灵魄 4",
+			int(drop_totals.get("兽骨", 0)) == 3 and int(drop_totals.get("灵魄", 0)) == 4,
 			str(drop_totals))
-	_check("精英的 bonus_drop（灵魄）叠在掉落之上：3 本体 + 1 奖励 = 4",
-			int(drop_totals.get("灵魄", 0)) == 4, "灵魄 %d" % int(drop_totals.get("灵魄", 0)))
+	_check("精英的灵石 = ELITE.stone（6）—— 设计 §5 的 5~8 档",
+			int(drop_totals.get(GameData.CURRENCY, 0)) == 6,
+			"灵石 %d" % int(drop_totals.get(GameData.CURRENCY, 0)))
+	_check("精英掉 2 片精印残片（§5 掉落阶梯）",
+			int(drop_totals.get("精印残片", 0)) == 2,
+			"精印残片 %d" % int(drop_totals.get("精印残片", 0)))
 	var lingpo_piles: Array = spawned.filter(func(q): return is_instance_valid(q) and str(q.item) == "灵魄")
 	_check("同名的两件灵魄并成了一堆（M30.1 就地钉住）", lingpo_piles.size() == 1,
 			"灵魄堆数 %d" % lingpo_piles.size())
@@ -5273,6 +5345,269 @@ func _run_selftest_body() -> void:
 	_check("换区：回到本体后 GameData 的 WORLD_* 跟着回来（不留上个区的残值）",
 			GameData.current_region == "cangwu" and GameData.WORLD_COLS == 112,
 			"region=%s cols=%d" % [GameData.current_region, GameData.WORLD_COLS])
+
+	# ==================== M35：灵印 / 材料 / 苍梧山怪物（数值设计 v2）====================
+	# ⭐ 验收标准：设计文档里的**每一条能验的数**，在代码里都找得到，而且**行为**真按它走。
+	#    ⚠️ 这一段放在最末：它会改玩家的印与背包状态，前面的断言不该被它影响。
+
+	# ---- 1. 材料 ----
+	_check("材料表只增不减（≥18 种）", GameData.MATERIALS.size() >= 18,
+			"实际 %d 种" % GameData.MATERIALS.size())
+	_check("材料表条目齐全（materials_well_formed）", GameData.materials_well_formed(), "有字段缺失")
+	var m35_mats := ["蛇胆", "灵木", "幽魂精髓", "百年蛇胆", "天雷木",
+			"百年竹心草", "灵狐内丹", "凡印残片", "精印残片", "通印残片"]
+	var m35_missing: Array = []
+	for m in m35_mats:
+		if not GameData.MATERIALS.has(str(m)):
+			m35_missing.append(str(m))
+	_check("苍梧山材料十种一种不少", m35_missing.is_empty(), str(m35_missing))
+	_check("残片自成一类（kind = 残片，占 1 容积）",
+			str(GameData.MATERIALS["凡印残片"]["kind"]) == "残片"
+			and int(GameData.KIND_VOLUME["残片"]) == 1, str(GameData.MATERIALS["凡印残片"]))
+	_check("残片表三档的目标都是真印、品阶对得上（shards_well_formed）",
+			GameData.shards_well_formed(), "残片表对不上")
+	_check("稀有触媒比地火芯贵一个档（≥130）",
+			int(GameData.MATERIALS["灵狐内丹"]["price"]) >= 130
+			and int(GameData.MATERIALS["天雷木"]["price"]) >= 130, "价格没拉开")
+
+	# ---- 2. 灵印 ----
+	var m35_seal_names := ["碎石印", "落叶印", "泥巴印", "雷雨印", "沸血印", "泥沼印", "熔岩印", "金刚印"]
+	var m35_seal_missing: Array = []
+	for s in m35_seal_names:
+		if not GameData.SEALS.has(str(s)):
+			m35_seal_missing.append(str(s))
+	_check("新增八枚印都在 SEALS 里", m35_seal_missing.is_empty(), str(m35_seal_missing))
+	var m35_bad_combo: Array = []
+	var m35_bad_recipe: Array = []
+	for s2 in ["雷雨印", "沸血印", "泥沼印", "熔岩印", "金刚印"]:
+		var sd: Dictionary = GameData.SEALS.get(str(s2), {})
+		if not bool(sd.get("fusion_only", false)):
+			m35_bad_combo.append(str(s2))
+		var rec: Array = sd.get("recipe", [])
+		if rec.size() != 2 or not GameData.SEALS.has(str(rec[0])) or not GameData.SEALS.has(str(rec[1])):
+			m35_bad_recipe.append(str(s2))
+	_check("五枚组合印都是 fusion_only（只能融出来，捡不到）", m35_bad_combo.is_empty(), str(m35_bad_combo))
+	_check("五枚组合印的配方都是两枚**已存在**的印", m35_bad_recipe.is_empty(), str(m35_bad_recipe))
+	_check("碎石印：rank 2 / 主动伤害写成倍率 2.0",
+			int(GameData.SEALS["碎石印"]["rank"]) == 2
+			and is_equal_approx(float(GameData.SEALS["碎石印"]["skill"]["power"]), 2.0),
+			str(GameData.SEALS["碎石印"]["skill"]))
+	var m35_fodder_ok := true
+	for s3 in ["落叶印", "泥巴印"]:
+		if str(GameData.SEALS[str(s3)]["skill"].get("kind", "")) != "none":
+			m35_fodder_ok = false
+	_check("落叶印 / 泥巴印是垫子印（skill.kind = none）", m35_fodder_ok, "它们居然能打人")
+	_check("配方表能反查出组合印（云雨+惊雷 → 雷雨印）",
+			GameData.fusion_result("云雨印", "惊雷印") == "雷雨印",
+			GameData.fusion_result("云雨印", "惊雷印"))
+	_check("配方匹配是**无序**的（惊雷+云雨 也给雷雨印）",
+			GameData.fusion_result("惊雷印", "云雨印") == "雷雨印",
+			GameData.fusion_result("惊雷印", "云雨印"))
+
+	# ---- 3. 融合（横向）----
+	# ⚠️ 主印刻意**不用灰烬印**：前面的 M13/M21 段落会把它升到 rank 3，词条上限就变成 3，
+	#    「rank 1 只能 1 条」这条规则就验不出来了。用垫子印当主印，数值干净。
+	# ⚠️ 灵力直接给足：融合/变异/破阶验的是「门槛与概率」，不是「你现在攒了多少灵力」。
+	#    用 essence_max 会随境界/炼化浮动，断言就变成了测上限而不是测规则。
+	player.essence = 999.0
+	player.gain_seal("落叶印")
+	player.gain_seal("泥巴印")
+	var m35_fuse_can: Dictionary = player.can_fuse_seals("落叶印", "泥巴印")
+	_check("落叶印能吃泥巴印（主印保留身份）", bool(m35_fuse_can["ok"]), str(m35_fuse_can))
+	_check("自己不能当自己的副印",
+			not bool(player.can_fuse_seals("落叶印", "落叶印")["ok"]), "居然能")
+	_check("组合印不能再当副印被吸收",
+			not bool(player.can_fuse_seals("落叶印", "雷雨印")["ok"]), "组合印被吃掉了")
+	# 失败分支：副印毁、主印无损（§3.2：失败只毁副印）
+	var m35_fail: Dictionary = player.fuse_seals("落叶印", "泥巴印", "", 0.99)
+	_check("融合掷到 0.99 ⇒ 失败（85% 那条线）", not bool(m35_fail.get("success", true)), str(m35_fail))
+	_check("失败：副印照样没了、主印一条词条都不加",
+			not player.has_seal("泥巴印") and player.affixes_of("落叶印").is_empty(),
+			"副印在=%s 词条=%d" % [str(player.has_seal("泥巴印")), player.affixes_of("落叶印").size()])
+	# 成功分支
+	player.essence = 999.0
+	player.gain_seal("泥巴印")
+	var m35_fuse: Dictionary = player.fuse_seals("泥巴印", "落叶印", "", 0.0)
+	_check("融合掷到 0.0 ⇒ 成功", bool(m35_fuse.get("success", false)), str(m35_fuse))
+	_check("副印被吸收掉了（融合是消耗品）", not player.has_seal("落叶印"), "落叶印还在")
+	var m35_aff: Array = player.affixes_of("泥巴印")
+	_check("主印身上多了一条融词条", m35_aff.size() == 1, str(m35_aff))
+	_check("融词条 = 副印 base × 50%（落叶攻+1 → +0.5）",
+			m35_aff.size() == 1 and str(m35_aff[0]["stat"]) == "attack_damage"
+			and is_equal_approx(float(m35_aff[0]["value"]), 0.5), str(m35_aff))
+	player.gain_seal("落叶印")
+	_check("融合上限 = 主印等级（rank 1 ⇒ 只能 1 条）",
+			not bool(player.can_fuse_seals("泥巴印", "落叶印")["ok"]), "居然还能融")
+
+	# ---- 4. 变异（§3.3）----
+	_check("变异表条目齐全（mutations_well_formed）", GameData.mutations_well_formed(), "有词条缺字段")
+	_check("五条变异途径的概率 = 设计值（5/15/20/30/2 %）",
+			is_equal_approx(GameData.mutation_chance("fusion"), 0.05)
+			and is_equal_approx(GameData.mutation_chance("fusion", true), 0.15)
+			and is_equal_approx(GameData.mutation_chance("env"), 0.20)
+			and is_equal_approx(GameData.mutation_chance("devour"), 0.30)
+			and is_equal_approx(GameData.mutation_chance("life_death"), 0.02),
+			"概率对不上")
+	player.essence = 999.0
+	player.bag.items["百年竹心草"] = 5
+	player.gain_seal("碎石印")
+	var m35_mut: Dictionary = player.fuse_seals("碎石印", "落叶印", "百年竹心草", 0.0, 0.0)
+	_check("投稀有触媒 + 变异掷到 0.0 ⇒ 出变异词条",
+			str(m35_mut.get("mutation", "")) != "", str(m35_mut))
+	_check("变异词条挂在主印上（每印最多 1 条）",
+			player.mutation_of("碎石印") != "", "碎石印没挂上")
+	_check("触媒被消耗（变异是要花钱的）", player.bag.count("百年竹心草") == 4,
+			"剩 %d" % player.bag.count("百年竹心草"))
+	_check("第二枚变异词条挂不上去（每印上限 1）",
+			not player._attach_mutation("碎石印", "灼烧"), "居然挂上了第二条")
+
+	# ---- 5. 升级（纵向，§3.4）----
+	_check("破阶成功率：0 祭品 30% / 1 枚 50% / 3 枚 90%",
+			is_equal_approx(GameData.upgrade_chance(0), 0.30)
+			and is_equal_approx(GameData.upgrade_chance(1), 0.50)
+			and is_equal_approx(GameData.upgrade_chance(3), 0.90),
+			"%.2f / %.2f / %.2f" % [GameData.upgrade_chance(0),
+					GameData.upgrade_chance(1), GameData.upgrade_chance(3)])
+	_check("祭品超过 3 枚不再加成功率（封顶 90%）",
+			is_equal_approx(GameData.upgrade_chance(9), 0.90), "%.2f" % GameData.upgrade_chance(9))
+	_check("炼化没满不许破阶（四条门槛之一）",
+			not bool(player.can_upgrade_seal("泥巴印", "地火芯")["ok"]), "居然能破阶")
+	player.seal_refine["泥巴印"] = float(GameData.REFINE["max"])
+	player.bag.items["地火芯"] = 1
+	_check("补上稀有触媒、炼化满了，门槛就过了",
+			bool(player.can_upgrade_seal("泥巴印", "地火芯")["ok"]),
+			str(player.can_upgrade_seal("泥巴印", "地火芯")))
+
+	# ---- 6. 苍梧山怪物 ----
+	var m35_shrew = null
+	var m35_snake = null
+	var m35_bamboo = null
+	var m35_fox = null
+	var m35_ghost = null
+	for e in enemies:
+		if not is_instance_valid(e):
+			continue
+		match str(e.archetype):
+			"铁齿竹鼠":
+				m35_shrew = e
+			"鬼影竹叶青":
+				m35_snake = e
+			"青木竹妖":
+				m35_bamboo = e
+			"碧眼灵狐":
+				m35_fox = e
+			"变异矿鬼":
+				m35_ghost = e
+	_check("苍梧山四种小怪 + 一只自成一档的精英都在场上",
+			m35_shrew != null and m35_snake != null and m35_bamboo != null and m35_fox != null,
+			"竹鼠=%s 竹叶青=%s 竹妖=%s 灵狐=%s" % [str(m35_shrew != null),
+					str(m35_snake != null), str(m35_bamboo != null), str(m35_fox != null)])
+	_check("矿鬼也在场上（第二只自成一档的精英）", m35_ghost != null, "找不到")
+
+	# 6a. 数值照抄设计表
+	_check("铁齿竹鼠：hp 50 / 攻 6 / 掉落兽骨×2",
+			m35_shrew != null and is_equal_approx(m35_shrew.hp_max, 50.0)
+			and is_equal_approx(float(GameData.ENEMY["铁齿竹鼠"]["attack_damage"]), 6.0)
+			and int(GameData.ENEMY["铁齿竹鼠"]["drops"]["兽骨"]) == 2, "对不上")
+	_check("鬼影竹叶青：hp 40 / 攻 12（剧毒）",
+			is_equal_approx(float(GameData.ENEMY["鬼影竹叶青"]["hp_max"]), 40.0)
+			and is_equal_approx(float(GameData.ENEMY["鬼影竹叶青"]["attack_damage"]), 12.0), "对不上")
+	_check("青木竹妖：hp 90 / 攻 8", is_equal_approx(float(GameData.ENEMY["青木竹妖"]["hp_max"]), 90.0)
+			and is_equal_approx(float(GameData.ENEMY["青木竹妖"]["attack_damage"]), 8.0), "对不上")
+
+	# 6b. 弱点（这一版最核心的新机制）
+	_check("竹鼠怕火 ×2（设计 §6）",
+			m35_shrew != null and is_equal_approx(m35_shrew.weakness_mult(["火"]), 2.0),
+			"倍率 %.2f" % (m35_shrew.weakness_mult(["火"]) if m35_shrew != null else -1.0))
+	_check("竹叶青怕火 ×1.5",
+			m35_snake != null and is_equal_approx(m35_snake.weakness_mult(["火"]), 1.5), "对不上")
+	_check("灵狐 / 矿鬼都怕光 ×1.5（「强光破」）",
+			m35_fox != null and is_equal_approx(m35_fox.weakness_mult(["光"]), 1.5)
+			and m35_ghost != null and is_equal_approx(m35_ghost.weakness_mult(["光"]), 1.5), "对不上")
+	_check("普攻没有标签 ⇒ 永远吃不到弱点",
+			m35_shrew != null and is_equal_approx(m35_shrew.weakness_mult([]), 1.0), "居然吃到了")
+	if m35_shrew != null:
+		m35_shrew.hp = m35_shrew.hp_max
+		var m35_hp0: float = m35_shrew.hp
+		m35_shrew.take_damage(10.0, Color.WHITE, false, ["火"])
+		_check("带「火」标签打竹鼠 = 实扣 20（弱点进了伤害结算，不只是个数字）",
+				is_equal_approx(m35_hp0 - m35_shrew.hp, 20.0),
+				"扣了 %.1f" % (m35_hp0 - m35_shrew.hp))
+		m35_shrew.hp = m35_shrew.hp_max
+		var m35_hp1: float = m35_shrew.hp
+		m35_shrew.take_damage(10.0, Color.WHITE, false, [])
+		_check("不带标签打同一只 = 只扣 10", is_equal_approx(m35_hp1 - m35_shrew.hp, 10.0),
+				"扣了 %.1f" % (m35_hp1 - m35_shrew.hp))
+
+	# 6c. 中立（竹鼠）
+	if m35_shrew != null:
+		m35_shrew.hp = m35_shrew.hp_max
+		m35_shrew._aggro = false
+		m35_shrew._provoked = false
+		m35_shrew.position = player.position + Vector2(0.0, 300.0)
+		m35_shrew.step_ai(0.05)
+		_check("竹鼠在窝外**不主动仇恨**（中立怪）", not m35_shrew._aggro, "居然扑上来了")
+		m35_shrew.position = player.position + Vector2(0.0, 60.0)
+		m35_shrew.step_ai(0.05)
+		_check("踩进它的窝（<90px）才翻脸", m35_shrew._aggro, "还是不理你")
+
+	# 6d. 伪装（竹妖）
+	if m35_bamboo != null:
+		m35_bamboo._aggro = false
+		m35_bamboo._provoked = false
+		m35_bamboo._revealed = false
+		m35_bamboo.position = player.position + Vector2(0.0, 400.0)
+		m35_bamboo.step_ai(0.05)
+		_check("竹妖没现形时「就是一根枯竹」（is_hidden）", m35_bamboo.is_hidden(), "一眼就露馅")
+		m35_bamboo.position = player.position + Vector2(0.0, 70.0)
+		m35_bamboo.step_ai(0.05)
+		_check("走进 110px 它就现形", not m35_bamboo.is_hidden(), "还装死")
+
+	# 6e. 分身（灵狐）+ 强光破
+	if m35_fox != null:
+		m35_fox.position = player.position + Vector2(150.0, 0.0)
+		m35_fox._aggro = false
+		m35_fox._provoked = false
+		m35_fox._clones_done = false
+		var m35_n0: int = enemies.size()
+		m35_fox.step_ai(0.05)
+		var m35_phantoms: Array = []
+		for e3 in enemies:
+			if is_instance_valid(e3) and bool(e3.get("is_phantom")):
+				m35_phantoms.append(e3)
+		_check("灵狐翻脸时放 2 个分身（1 真 2 假）", m35_phantoms.size() == 2,
+				"分身 %d 个（总数 %d → %d）" % [m35_phantoms.size(), m35_n0, enemies.size()])
+		if m35_phantoms.size() > 0:
+			var m35_ph = m35_phantoms[0]
+			_check("分身只有本体 1% 的血（一碰就碎）",
+					m35_ph.hp_max < m35_fox.hp_max * 0.05, "%.1f / %.1f" % [m35_ph.hp_max, m35_fox.hp_max])
+			_check("分身打人不掉血（它是骗你的，不是第二个 boss）",
+					is_zero_approx(m35_ph.damage_value()), "%.2f" % m35_ph.damage_value())
+			var m35_pk0: int = pickups.size()
+			m35_ph.take_damage(99999.0, Color.WHITE, false)
+			_check("分身死了**什么都不掉**（不能拿它刷灵魄）", pickups.size() == m35_pk0,
+					"多掉了 %d 件" % (pickups.size() - m35_pk0))
+		# 强光破：带「光」标签打本体，幻影全散
+		m35_fox.hp = m35_fox.hp_max
+		m35_fox.take_damage(1.0, Color.WHITE, false, ["光"])
+		var m35_left := 0
+		for e4 in enemies:
+			if is_instance_valid(e4) and bool(e4.get("is_phantom")):
+				m35_left += 1
+		_check("强光破：带「光」标签打本体，分身全散", m35_left == 0, "还剩 %d 个" % m35_left)
+
+	# ---- 7. 掉落阶梯（灵石精英专属）----
+	var m35_stone_mobs: Array = []
+	for key2 in GameData.ENEMY_DROPS.keys():
+		if (GameData.ENEMY_DROPS[key2] as Dictionary).has(GameData.CURRENCY):
+			m35_stone_mobs.append(str(key2))
+	_check("普通怪的掉落表里**一分灵石都没有**（§0 第二条锚点）", m35_stone_mobs.is_empty(),
+			str(m35_stone_mobs))
+	_check("精英档的灵石写在自己的 stone 字段上（灵狐 5 / 矿鬼 6）",
+			int(GameData.ENEMY["碧眼灵狐"]["stone"]) == 5
+			and int(GameData.ENEMY["变异矿鬼"]["stone"]) == 6, "对不上")
+	_check("精英还有一份 bonus_drop 与残片（ELITE 表）",
+			GameData.ELITE.has("bonus_drop") and str(GameData.ELITE["shard"]) == "精印残片", "缺字段")
 
 	_st_done = true                  # ⭐ 只有全程没抛异常才会走到这（假绿灯的判据）
 

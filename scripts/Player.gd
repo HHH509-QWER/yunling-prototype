@@ -162,6 +162,10 @@ func _process(delta: float) -> void:
 		queue_redraw()
 	if _dash_left > 0.0:
 		_dash_left = maxf(0.0, _dash_left - delta)
+	## ⭐ M35：藤蔓控制（青木竹妖）倒计时。到 0 就恢复自由 —— 这里**只有一个出口**。
+	if _root_left > 0.0:
+		_root_left = maxf(0.0, _root_left - delta)
+		queue_redraw()
 	if _hurt > 0.0:
 		_hurt = maxf(0.0, _hurt - delta * 3.5)
 		queue_redraw()
@@ -292,6 +296,10 @@ func _anim_texture() -> Texture2D:
 ## WASD / 方向键移动。
 ## dir.normalized() 不能省：不归一化的话，斜着走会快 1.41 倍（勾股定理）。
 func _move(delta: float) -> void:
+	# ⭐ M35：被藤蔓钉住了就一步都动不了（但不是"眩晕"—— 还能出招、还能显化印）。
+	#    竹妖的威胁因此是「把你钉在别的东西面前」，而不是「把你打死」。
+	if _root_left > 0.0:
+		return
 	# ⭐ 键位现在写在 InputMap 里（project.godot 的 [input] 段），代码只认动作名。
 	#    想改键 / 加手柄，去 项目设置 → 输入映射 改，这一行不用动。
 	var dir := Input.get_vector("move_left", "move_right", "move_up", "move_down")
@@ -396,7 +404,7 @@ func _strike() -> void:
 	var a: Dictionary = GameData.ATTACK
 	game.spawn_hit(attack_center(), facing,
 			float(a["length"]), float(a["width"]),
-			float(GameData.attack_of(realm)["damage"]) + attack_damage_bonus())
+			(float(GameData.attack_of(realm)["damage"]) + attack_damage_bonus()) * damage_mult())
 
 
 ## ⭐ M34：**朝向锚点** —— 身体只有 4 张图，「现在在瞄哪边」靠这个自由角度的小东西说。
@@ -530,6 +538,8 @@ func summon_slot(i: int, d: Dictionary) -> void:
 	var mount: Vector2 = GameData.BODY_PARTS[str(d["body_part"])]
 	# ⭐ 升阶过的印，血量和招式都按它**当前**的等级算
 	seal.rank_scale = skill_scale_of(str(slot_seal[i]))
+	## ⭐ M35：变异词条跟着印走 —— 显化的这一枚如果变异过，招式就带它的效果。
+	seal.mutation = mutation_of(str(slot_seal[i]))
 	seal.setup(str(slot_seal[i]),
 			float(d["seal_hp_max"]) * seal_hp_scale_of(str(slot_seal[i])), self, mount, game)
 	seal.died.connect(_on_seal_died)
@@ -934,6 +944,26 @@ func can_seize() -> bool:
 	return aperture_count() < capacity()       # ⭐ 容量由境界决定（M12）
 
 
+## ⭐ M35：被抽走灵力（变异矿鬼的「吸灵力」）。
+##    ⚠️ 只扣当前值，不动上限 —— 上限是修炼出来的，被打两下就掉上限会毁掉成长感。
+##    返回实际被抽走了多少（不够就抽干为止）。
+func drain_essence(amount: float) -> float:
+	if _dead or amount <= 0.0:
+		return 0.0
+	var before := essence
+	essence = maxf(0.0, essence - amount)
+	return before - essence
+
+
+## ⭐ M35：被藤蔓钉住（青木竹妖）。只禁移动，不禁出招与显化印。
+func root_for(seconds: float) -> void:
+	_root_left = maxf(_root_left, seconds)
+
+
+func is_rooted() -> bool:
+	return _root_left > 0.0
+
+
 ## 回血（云雨印那种）。⭐ 不超过上限 —— 溢出的部分直接丢掉，不攒着。返回实际回了多少。
 func heal(amount: float) -> float:
 	if _dead or amount <= 0.0:
@@ -1071,6 +1101,8 @@ var _bulwark_speed := 1.0        # 山岳：移速乘数（会变慢）
 var _haste_left := 0.0           # 疾风：加速剩余
 var _haste_speed := 1.0          # 疾风：移速乘数
 var _invuln := 0.0               # 无敌帧剩余（闪避给的那 0.26 秒）
+## ⭐ M35：藤蔓控制剩余秒数（> 0 = 钉住不动）。青木竹妖用。
+var _root_left := 0.0
 var _dash_left := 0.0            # 加速剩余
 var _dodge_left := 0.0           # 翻滚剩余时间（位移是"滚"出来的，不是瞬移）
 var _dodge_dir := Vector2.ZERO   # 翻滚方向（按下那一刻定死，滚到一半不能拐弯）
@@ -1383,7 +1415,7 @@ func base_bonus_add(stat: String) -> float:
 		var b: Dictionary = GameData.SEALS[name_key].get("base", {})
 		if str(b.get("stat", "")) == stat:
 			total += float(b.get("value", 0.0))
-	return total
+	return total + affix_add(stat)
 
 
 ## 炼化满带来的**永久乘算**加成（普攻冷却）。多个就相乘。
@@ -1395,7 +1427,7 @@ func base_bonus_mult(stat: String) -> float:
 		var b: Dictionary = GameData.SEALS[name_key].get("base", {})
 		if str(b.get("stat", "")) == stat:
 			m *= float(b.get("value", 0.0))
-	return m
+	return m * affix_mult(stat)
 
 
 func _passive_sum(kind: String) -> float:
@@ -1419,6 +1451,279 @@ func _passive_product(kind: String) -> float:
 		if str(d["passive"]) == kind:
 			mult *= float(d["passive_value"])
 	return mult
+
+
+## ⭐ 普攻的**伤害倍率**被动（碎石印的「穿刺 +6%」）。
+## ⭐ M35 新增的被动种类：工程里还没有护甲这个量，所以「无视 6% 防御」先等价成「伤害 ×1.06」。
+##    等敌人有护甲了，改成真的穿甲即可，字段名不用动。
+func damage_mult() -> float:
+	return _passive_product("damage_mult") * base_bonus_mult("damage_mult")
+
+
+## 变异词条给的伤害倍率（§3.3.2 三大质变统一 ×1.5）。
+## ⭐ 只有**显化中**的印才吃得到 —— 它是印的招式变强，不是主角变强。
+func mutation_damage_mult() -> float:
+	var m := 1.0
+	for seal in summoned_seals():
+		if not is_instance_valid(seal):
+			continue
+		if str(seal.mutation) == "":
+			continue
+		var aff: Dictionary = GameData.mutation_affix(str(seal.mutation))
+		m *= float(aff.get("damage_mult", GameData.MUTATION["damage_mult"]))
+	return m
+
+
+# ==================== 融合 · 变异 · 升级（M35）====================
+## 词条状态。⭐ 两条都挂在**印名**上（和 `seal_rank` / `seal_refine` 同一个规矩）：
+##    「这一枚印经历过什么」是这枚印的事，不是槽位的事 —— 换槽位不该丢词条。
+var seal_affix: Dictionary = {}      # 印名 -> Array[{"stat","value","from","kind"}]
+var seal_mutation: Dictionary = {}   # 印名 -> 变异词条名（最多 1 条）
+
+
+## 这枚印上的融词条。
+func affixes_of(name_key: String) -> Array:
+	return (seal_affix.get(name_key, []) as Array)
+
+
+func mutation_of(name_key: String) -> String:
+	return str(seal_mutation.get(name_key, ""))
+
+
+## 融词条的**加算**部分（气血上限 / 攻击 / 灵力上限 / 移速）。
+func affix_add(stat: String) -> float:
+	var total := 0.0
+	for name_key in affix_holder_names():
+		for a in affixes_of(name_key):
+			if str(a.get("stat", "")) == stat:
+				total += float(a.get("value", 0.0))
+	return total
+
+
+## 融词条的**乘算**部分（普攻冷却 / 伤害倍率）。
+func affix_mult(stat: String) -> float:
+	var m := 1.0
+	for name_key in affix_holder_names():
+		for a in affixes_of(name_key):
+			if str(a.get("stat", "")) == stat:
+				m *= float(a.get("value", 1.0))
+	return m
+
+
+## 哪些印的词条**现在生效**：炼化满且没被封印的（和 base 属性同一个门槛）。
+## ⚠️ 不显化也给 —— 融词条是「印的成长」，不是「印的招式」。
+func affix_holder_names() -> Array:
+	var out: Array = []
+	for k in seal_affix.keys():
+		if not has_seal(str(k)):
+			continue
+		if is_sealed(str(k)):
+			continue
+		if not is_refined(str(k)):
+			continue
+		out.append(str(k))
+	return out
+
+
+## 现在能融吗？（不含成功率判定 —— 那是 `fuse_seals` 里掷骰子的事）
+func can_fuse_seals(main_name: String, sub_name: String) -> Dictionary:
+	var base := GameData.can_fuse(main_name, sub_name)
+	if not bool(base["ok"]):
+		return base
+	if not has_seal(main_name) or not has_seal(sub_name):
+		return {"ok": false, "reason": "手上没有这枚印"}
+	if not can_use_as_material(sub_name):
+		return {"ok": false, "reason": "本命印不能当副印"}
+	var lim := GameData.fusion_limit(rank_of(main_name))
+	if affixes_of(main_name).size() >= lim:
+		return {"ok": false, "reason": "融词条已满（上限 = 印的等级 %d 条）" % lim}
+	return {"ok": true, "reason": ""}
+
+
+## 融合。⭐⭐ **横向变强**：主印身份全保留，副印的 base ×50% 变成一条融词条。
+##   `catalyst` = 稀有触媒名（可空）：投了就开那扇 5% / 15% 的变异门。
+##   `roll` / `mut_roll` = **注入的随机数**（自测传定值，生产传 -1 = 自己取 randf）。
+## ⚠️ 失败：副印照样消耗、灵力照样扣、主印无损（§3.2）。这是「豪赌」的一半：
+##    赌错的代价是**材料没了**，不是**印没了**。
+func fuse_seals(main_name: String, sub_name: String, catalyst := "", roll := -1.0, mut_roll := -1.0) -> Dictionary:
+	var ok := can_fuse_seals(main_name, sub_name)
+	if not bool(ok["ok"]):
+		return {"ok": false, "reason": str(ok["reason"])}
+	var cost := GameData.fusion_cost(rank_of(main_name))
+	if essence < cost:
+		return {"ok": false, "reason": "灵力不足（要 %.0f）" % cost}
+
+	## 触媒校验：必须是材料表里的稀有触媒，而且手上真有
+	if catalyst != "":
+		if not GameData.MATERIALS.has(catalyst):
+			return {"ok": false, "reason": "没有这种触媒"}
+		if int(bag.count(catalyst)) <= 0:
+			return {"ok": false, "reason": "没有 %s" % catalyst}
+		var mk := str(GameData.MATERIALS[catalyst].get("kind", ""))
+		if mk != "触媒":
+			return {"ok": false, "reason": "%s 不是触媒" % catalyst}
+
+	essence -= cost
+	consume_seal(sub_name)                 # 副印先走（成功失败都走）
+	if catalyst != "":
+		bag.remove(catalyst, 1)
+
+	var r := roll if roll >= 0.0 else randf()
+	var success := r < float(GameData.FUSION["success"])
+	var result := {"ok": true, "success": success, "affix": {}, "mutation": "", "combo": "", "cost": cost}
+	if not success:
+		result["reason"] = "融合失败（副印已毁，主印无损）"
+		queue_redraw()
+		return result
+
+	## 成功：加一条融词条
+	var aff: Dictionary = GameData.fusion_affix(sub_name)
+	if not aff.is_empty():
+		var list: Array = seal_affix.get(main_name, [])
+		list.append(aff)
+		seal_affix[main_name] = list
+		result["affix"] = aff
+
+	## 配方命中 ⇒ 变成**组合印**（§2.2）。⚠️ 组合印是「换一枚印」，不是「加词条」。
+	var combo_name := GameData.fusion_result(main_name, sub_name)
+	if combo_name != "" and not has_seal(combo_name):
+		consume_seal(main_name)
+		seal_affix.erase(main_name)
+		gain_seal(combo_name)
+		result["combo"] = combo_name
+
+	## 变异门（§3.3.1 ①）：投了稀有触媒才掷这一次骰子
+	if catalyst != "":
+		var attuned := _catalyst_attuned(catalyst, main_name, sub_name)
+		var p := GameData.mutation_chance("fusion", attuned)
+		var mr := mut_roll if mut_roll >= 0.0 else randf()
+		if mr < p:
+			var target := combo_name if combo_name != "" else main_name
+			var name_pick := _pick_mutation_affix(catalyst, int(mr * 1000.0))
+			if name_pick != "" and _attach_mutation(target, name_pick):
+				result["mutation"] = name_pick
+	queue_redraw()
+	return result
+
+
+## 触媒和主副印「属性契合」吗？（§3.3.1：契合 15%，不契合 5%）
+## ⭐ 判据只有一条：触媒带的世界标签和印的 tags 有交集。数据在 `CATALYST_TAGS` 里。
+const CATALYST_TAGS := {
+	"百年蛇胆": ["毒", "木"],
+	"天雷木": ["雷", "木"],
+	"百年竹心草": ["木", "水"],
+	"灵狐内丹": ["幻", "光"],
+}
+
+
+func _catalyst_attuned(catalyst: String, main_name: String, sub_name: String) -> bool:
+	var ct: Array = CATALYST_TAGS.get(catalyst, [])
+	var tags: Array = []
+	for n in [main_name, sub_name]:
+		if not GameData.SEALS.has(str(n)):
+			continue
+		for t in (GameData.SEALS[str(n)].get("tags", []) as Array):
+			tags.append(str(t))
+	for t2 in ct:
+		if tags.has(str(t2)):
+			return true
+	return false
+
+
+## 由触媒决定出哪一条变异词条（确定性：同一份触媒 + 同一个 roll 给同一结果）。
+func _pick_mutation_affix(catalyst: String, roll: int) -> String:
+	var pool: Array = []
+	match catalyst:
+		"百年蛇胆":
+			pool = ["灼烧", "穿甲"]
+		"天雷木":
+			pool = ["连锁雷"]
+		"百年竹心草":
+			pool = ["致盲"]
+		"灵狐内丹":
+			pool = ["迷幻", "轻灵风"]
+		_:
+			pool = (GameData.MUTATION["affixes"] as Dictionary).keys()
+	if pool.is_empty():
+		return ""
+	return str(pool[absi(roll) % pool.size()])
+
+
+## 给一枚印挂上变异词条。⚠️ 每枚最多 1 条（§3.3.5 第 5 条）。
+func _attach_mutation(name_key: String, affix_name: String) -> bool:
+	if not has_seal(name_key) or GameData.mutation_affix(affix_name).is_empty():
+		return false
+	if mutation_of(name_key) != "":
+		return false
+	seal_mutation[name_key] = affix_name
+	return true
+
+
+## ⭐ 直接获得一枚**带词条的变异印**（§3.3.1 ⑤：精英掉落 / 奇遇 / 秘境）。
+func gain_mutated_seal(name_key: String, affix_name: String) -> bool:
+	if not gain_seal(name_key):
+		return false
+	return _attach_mutation(name_key, affix_name)
+
+
+## 破阶门槛（§3.4 四条，缺一不可）。返回 {ok, reason}。
+func can_upgrade_seal(name_key: String, catalyst := "", env_ok := true) -> Dictionary:
+	if not has_seal(name_key):
+		return {"ok": false, "reason": "手上没有这枚印"}
+	var target := rank_of(name_key) + 1
+	if target > int(GameData.RANKS.size()):
+		return {"ok": false, "reason": "已经是最高等"}
+	if int(realm_data()["seal_rank_max"]) < target:
+		return {"ok": false, "reason": "境界不够：需 %s" % seal_gate_realm_name(target)}
+	if not is_refined(name_key):
+		return {"ok": false, "reason": "炼化未满"}
+	if catalyst == "":
+		return {"ok": false, "reason": "缺天材地宝（稀有触媒）"}
+	if not GameData.MATERIALS.has(catalyst) or int(bag.count(catalyst)) <= 0:
+		return {"ok": false, "reason": "没有 %s" % catalyst}
+	if not env_ok:
+		return {"ok": false, "reason": "环境不匹配"}
+	return {"ok": true, "reason": "", "target": target}
+
+
+## 破阶。⭐⭐ **纵向变强**：主印 rank +1，保留它的身份（名字 / 主动 / 词条）。
+##   成功率 = 30% + 20% × 同名祭品（最多 3 枚 ⇒ 最高 90%）。
+##   失败 = 祭品 + 材料全毁，主印 90% 重伤（这里落成「炼化度清零」）、10% 碎裂，
+##   并且**雷劫反噬气血上限 −10%**。
+## ⚠️ 为什么失败要掉气血上限：这是设计里唯一一处「失败会留下永久痕迹」的代价 ——
+##    没有它，破阶就只是「多试几次」，豪赌那口气就没了。
+func upgrade_seal(name_key: String, fodder: Array, catalyst := "", env_ok := true, roll := -1.0) -> Dictionary:
+	var ok := can_upgrade_seal(name_key, catalyst, env_ok)
+	if not bool(ok["ok"]):
+		return {"ok": false, "reason": str(ok["reason"])}
+	var fodders: Array = []
+	for f in fodder:
+		if str(f) == name_key and has_seal(str(f)) and can_use_as_material(str(f)):
+			fodders.append(str(f))
+	if fodders.size() > int(GameData.UPGRADE["fodder_max"]):
+		fodders = fodders.slice(0, int(GameData.UPGRADE["fodder_max"]))
+
+	var chance := GameData.upgrade_chance(fodders.size())
+	var r := roll if roll >= 0.0 else randf()
+
+	# 消耗：触媒 + 祭品（无论成败都消耗 —— 这是「豪赌」的定义）
+	bag.remove(catalyst, 1)
+	var fcount := fodders.size()
+	for f in fodders:
+		consume_seal(str(f))
+
+	if r < chance:
+		seal_rank[name_key] = rank_of(name_key) + 1
+		queue_redraw()
+		return {"ok": true, "success": true, "rank": int(seal_rank[name_key]),
+				"chance": chance, "fodder": fcount}
+	# 失败：炼化清零（「重伤」的落地写法）+ 气血上限 −10%
+	seal_refine[name_key] = 0.0
+	hp_max = maxf(1.0, hp_max * (1.0 - float(GameData.UPGRADE["fail_hp_cap"])))
+	hp = minf(hp, hp_max)
+	queue_redraw()
+	return {"ok": true, "success": false, "rank": rank_of(name_key),
+			"chance": chance, "fodder": fcount}
 
 
 ## 槽位受损倒计时。到 0 就自动恢复可用 —— 不需要任何「恢复」按钮。

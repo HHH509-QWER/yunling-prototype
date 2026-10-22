@@ -104,6 +104,56 @@ const SEALS = {
     fillPoly(b, pts, base); dress(b, base, dark, light);
     fillPoly(b, [[16, 11], [19, 16], [13, 16]], light);
   } },
+
+  // ---- 《数值设计》v2 §2.1 的三枚基础印 + §2.2 的五枚组合印 ----
+  // ⚠️ 形状名必须和 GameData.SEALS[*].shape、SealPanel._shape_points 三处对齐。
+  seal_shard:    { color: [189, 181, 158], draw: (b, base, dark, light) => {           // 碎石印 shard：三块尖石
+    fillPoly(b, [[16, 3], [24, 15], [16, 21], [9, 14]], base);
+    fillPoly(b, [[7, 17], [13, 27], [5, 28]], base);
+    fillPoly(b, [[24, 18], [28, 28], [19, 27]], base);
+    dress(b, base, dark, light);
+    fillPoly(b, [[16, 7], [20, 14], [16, 17], [13, 14]], light);
+  } },
+  seal_fallen:   { color: [158, 189, 97], draw: (b, base, dark, light) => {            // 落叶印 leaf2：一片斜叶
+    fillPoly(b, [[8, 26], [13, 11], [21, 5], [26, 10], [20, 22]], base);
+    dress(b, base, dark, light);
+    for (let i = 0; i < 13; i++) set(b, 10 + i * 1.1, 25 - i * 1.5, dark);               // 叶脉
+  } },
+  seal_mud:      { color: [140, 115, 82], draw: (b, base, dark, light) => {            // 泥巴印 mud：一滩泥
+    const pts = [];
+    for (let a = 0; a < 12; a++) { const r = a % 2 ? 9 : 13; pts.push([16 + Math.cos(a * Math.PI / 6) * r, 19 + Math.sin(a * Math.PI / 6) * r * 0.75]); }
+    fillPoly(b, pts, base); dress(b, base, dark, light);
+    fillPoly(b, [[11, 15], [19, 15], [17, 21], [12, 21]], dark);
+  } },
+  seal_thunderrain: { color: [133, 184, 242], draw: (b, base, dark, light) => {       // 雷雨印 storm：云 + 闪电
+    fillPoly(b, [[6, 12], [10, 6], [17, 5], [24, 8], [27, 14], [22, 17], [9, 17]], base);
+    dress(b, base, dark, light);
+    fillPoly(b, [[18, 16], [12, 24], [16, 24], [14, 30], [22, 21], [17, 21], [20, 16]], [255, 248, 190]);
+  } },
+  seal_boil:     { color: [224, 133, 107], draw: (b, base, dark, light) => {           // 沸血印 boil：翻滚的三泡
+    fillPoly(b, [[5, 24], [9, 14], [16, 11], [23, 14], [27, 24]], base);
+    dress(b, base, dark, light);
+    fillPoly(b, [[9, 21], [11, 15], [15, 15], [15, 21]], light);
+    fillPoly(b, [[17, 21], [18, 16], [22, 17], [22, 22]], light);
+  } },
+  seal_mire:     { color: [122, 143, 107], draw: (b, base, dark, light) => {           // 泥沼印 mire：漩涡
+    fillPoly(b, [[16, 3], [27, 12], [24, 26], [9, 27], [5, 13]], base);
+    dress(b, base, dark, light);
+    const pts = [];
+    for (let a = 0; a < 26; a++) { const r = 2 + a * 0.34; pts.push([16 + Math.cos(a * 0.62) * r, 16 + Math.sin(a * 0.62) * r]); }
+    fillPoly(b, pts, dark);
+  } },
+  seal_lava:     { color: [235, 112, 56], draw: (b, base, dark, light) => {            // 熔岩印 lava：裂开的岩
+    fillPoly(b, [[16, 4], [27, 15], [23, 28], [9, 28], [5, 15]], base);
+    dress(b, base, dark, light);
+    set(b, 16, 12, [255, 236, 150]);
+    fillPoly(b, [[16, 10], [13, 18], [16, 17], [15, 25], [21, 16], [17, 16], [19, 10]], [255, 214, 96]);
+  } },
+  seal_vajra:    { color: [199, 184, 117], draw: (b, base, dark, light) => {           // 金刚印 vajra：十字杵
+    fillPoly(b, [[13, 5], [19, 5], [19, 13], [27, 13], [27, 19], [19, 19], [19, 27], [13, 27], [13, 19], [5, 19], [5, 13], [13, 13]], base);
+    dress(b, base, dark, light);
+    fillPoly(b, [[14, 14], [18, 14], [18, 18], [14, 18]], dark);
+  } },
 };
 
 const TBL = (() => { const t = new Int32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; t[n] = c; } return t; })();
