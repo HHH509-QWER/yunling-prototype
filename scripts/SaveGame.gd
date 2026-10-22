@@ -5,7 +5,12 @@ extends RefCounted
 ##    不会污染真存档；磁盘读写只是薄薄一层包装。
 ## ⚠️ 不写 class_name（新增全局类名要先由编辑器扫描，否则命令行自测直接报错）。
 
-const VERSION := 8      # 2：灵印等级/商人货架；7：世界放大 4 倍（M30.25）；8：世界容器改尺寸（M31）
+const VERSION := 9      # 2：灵印等级/商人货架；7：世界放大 4 倍（M30.25）；8：世界容器改尺寸（M31）
+                        # 9（M34）：**多区域** —— 存档记 `region` + `anchor_global`（全局坐标）
+## ⭐ M34：v9 起存**全局坐标**（区域原点 × 32 + 局部）。为什么不在存档里只存区域局部坐标：
+##    那样一旦把「切换」升级成「无缝」，所有存档都要再迁一次。全局坐标让**区域布局**变成
+##    纯数据（改 REGIONS 的 origin 即可），存档不用懂它。
+const VERSION_REGION := 9
 ## ⭐ M31 Step 0：世界容器从 5120×2880 改成 3584×3072 —— 旧档坐标按比例缩放后 clamp，
 ##    否则一读档就跑到图外（纵横比也变了，必须**分轴**缩放，不能只乘一个数）。
 const VERSION_WORLD_RESIZE := 8
@@ -23,8 +28,13 @@ const VERSION_WORLD_HALVED := 5
 
 static func to_dict(game) -> Dictionary:
 	var p = game.player
+	## ⭐ M34：锚点存**全局坐标**（区域原点 + 局部），同时保留一个 `anchor` 局部值给旧读取器/人看。
+	var reg := str(game.current_region)
+	var gl: Vector2 = GameData.local_to_global(reg, game.spawn_point)
 	return {
 		"version": VERSION,
+		"region": reg,
+		"anchor_global": [gl.x, gl.y],
 		"anchor": [game.spawn_point.x, game.spawn_point.y],
 		"realm": int(p.realm),
 		"slots": p.slot_seal.duplicate(),
@@ -45,29 +55,43 @@ static func to_dict(game) -> Dictionary:
 ## 把存档写回游戏。返回是否成功。
 ## ⚠️ 槽位数不符的存档一律拒绝 —— 宁可读不进来，也不要读进来一个长短不一的命窍。
 static func from_dict(game, data: Dictionary) -> bool:
-	if not data.has("anchor"):
+	if not data.has("anchor") and not data.has("anchor_global"):
 		return false
 	var slots: Array = data.get("slots", [])
 	var p = game.player
 	if slots.size() != p.slot_seal.size():
 		return false
-	var a: Array = data["anchor"]
-	game.spawn_point = Vector2(float(a[0]), float(a[1]))
-	# ⭐ 迁移：v5 起世界与所有距离**减半**（M29：相机 zoom = 2，屏幕观感不变、像素粗一倍）。
-	#    旧档里的坐标是旧世界的 —— 不减半会把出生点丢到世界外（旧中心 1280,720
-	#    正好是新世界 1280×720 的右下角）。
-	if int(data.get("version", 0)) < VERSION_WORLD_HALVED:
-		game.spawn_point *= 0.5
-	# ⭐ 迁移：v7 起世界**放大 4 倍**（5120×2880）。旧档坐标 ×4 才落在同一片地形上。
-	if int(data.get("version", 0)) < VERSION_WORLD_QUAD:
-		game.spawn_point *= 4.0
-	# ⭐ 迁移：v8 起世界容器**改尺寸**（5120×2880 → 3584×3072）。
-	#    旧档坐标按**分轴比例**缩放（×0.7 / ×1.0667）才落在同一片地形上。
-	#    ⚠️ 不能只乘一个数：纵横比从 16:9 变成 7:6，等比缩放会把出生点挤偏。
-	if int(data.get("version", 0)) < VERSION_WORLD_RESIZE:
-		game.spawn_point *= GameData.WORLD["size"] / WORLD_SIZE_V7
-	# 兜底：坐标一律夹进世界内（手改坏的存档也不至于把主角丢到图外）
-	var ws: Vector2 = GameData.WORLD["size"]
+	## ⭐ M34：**先定区域，再算坐标** —— 区域的 origin 参与全局↔局部换算。
+	##    顺序反了的话，旧档（没有 region 字段）会按上一区的 origin 去减，直接错位。
+	var want_region := str(data.get("region", GameData.START_REGION))
+	if not GameData.REGIONS.has(want_region):
+		want_region = GameData.START_REGION
+	GameData.set_region(want_region)
+	game.current_region = want_region
+	if data.has("anchor_global"):
+		## v9 起：全局坐标。
+		var ag: Array = data["anchor_global"]
+		game.spawn_point = GameData.global_to_local(want_region,
+				Vector2(float(ag[0]), float(ag[1])))
+	else:
+		## v8 及更老：`anchor` 是**单世界**里的局部坐标 —— 就是 cangwu 的局部坐标。
+		var a: Array = data["anchor"]
+		game.spawn_point = Vector2(float(a[0]), float(a[1]))
+		# ⭐ 迁移：v5 起世界与所有距离**减半**（M29：相机 zoom = 2，屏幕观感不变、像素粗一倍）。
+		#    旧档里的坐标是旧世界的 —— 不减半会把出生点丢到世界外（旧中心 1280,720
+		#    正好是新世界 1280×720 的右下角）。
+		if int(data.get("version", 0)) < VERSION_WORLD_HALVED:
+			game.spawn_point *= 0.5
+		# ⭐ 迁移：v7 起世界**放大 4 倍**（5120×2880）。旧档坐标 ×4 才落在同一片地形上。
+		if int(data.get("version", 0)) < VERSION_WORLD_QUAD:
+			game.spawn_point *= 4.0
+		# ⭐ 迁移：v8 起世界容器**改尺寸**（5120×2880 → 3584×3072）。
+		#    旧档坐标按**分轴比例**缩放（×0.7 / ×1.0667）才落在同一片地形上。
+		#    ⚠️ 不能只乘一个数：纵横比从 16:9 变成 7:6，等比缩放会把出生点挤偏。
+		if int(data.get("version", 0)) < VERSION_WORLD_RESIZE:
+			game.spawn_point *= GameData.region_size(GameData.START_REGION) / WORLD_SIZE_V7
+	# 兜底：坐标一律夹进**当前区域**内（手改坏的存档也不至于把主角丢到图外）
+	var ws: Vector2 = GameData.region_size(want_region)
 	game.spawn_point = Vector2(clampf(game.spawn_point.x, 0.0, ws.x),
 			clampf(game.spawn_point.y, 0.0, ws.y))
 	p.realm = int(data.get("realm", 1))

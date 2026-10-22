@@ -19,11 +19,13 @@ const SmithScript := preload("res://scripts/Smith.gd")
 const MerchantScript := preload("res://scripts/Merchant.gd")
 const TradeScript := preload("res://scripts/Trade.gd")
 const ForegroundLayerScript := preload("res://scripts/ForegroundLayer.gd")
+const PropsScript := preload("res://scripts/Props.gd")
 
 var player: Player = null
 var dummies: Array = []        # 场上所有假人（M1 的靶子，一直留着当验收基线）
 var enemies: Array = []        # 场上所有敌人（M4）
-var hits: Array = []           # 短命伤害区，只用于判定和显示
+var hits: Array = []           # 飞行中的气（判定 + 表现同一份数据，见 _advance_hits）
+var impacts: Array = []        # ⭐ M33：命中冲击（纯表现，气打到人身上那一圈）
 var swings: Array = []         # ⭐ M30.7：掌风弧光（**纯表现**，不参与任何判定）
 var font: Font = null
 
@@ -50,6 +52,9 @@ var seize_dup_hint := false
 ##    付过两次学费，不付第三次。
 const SEAL_TIER_ORD := {3: "三", 4: "四", 5: "五"}
 const SEAL_TIER_WORD := {3: "上品之印", 4: "绝品之印", 5: "传说之印"}
+## ⚠️ 材料种类的**下限**（不是「恰好几种」）：守的是「材料被悄悄删掉」。
+##    写死 `== 8` 时，数据层每加一种新材料这条就红一次 —— 那是在惩罚正常加内容。
+const MATERIAL_MIN := 8
 ## 锚点快照：敌人（谁活着 / 在哪 / 多少血）+ 采集点（哪些空了）。
 ## ⭐ 死亡 = 恢复这张快照 —— 死之后杀掉的敌人会回来、采空的点会复原（待决问题 8）。
 var snapshot: Dictionary = {}
@@ -85,13 +90,11 @@ var fg_layer: Node2D = null       # 懒建：第一次打开时才挂上来
 ## ⭐ 保留的只有 `_check_world_terrain()` 里**与高度无关**的两条（水面占比 / 泥沼占比），
 ##    它们守的是地形分布「水面悄悄没了 / 新增地形被烘没了」，平面化不影响，见
 ##    `_check_world_composition()`。
-## ⭐ M31.3：**素色直出**（命令行 `--flat`，抓帧测量专用）。
-##    抓帧默认画面叠着 CanvasModulate 压暗 + 后处理分级 ⇒ 暗地形和
-##    clear color 只差几个灰阶，像素统计根本分不开（前两轮"把暗紫块当地形"的眼误就是这么来的）。
-##    素色直出 = 关掉这些叠层，让画面只剩「地形 or clear color」两种可能 ——
-##    测的是**几何覆盖**，光照调色全都不影响几何，关掉不损失任何结论效力。
-##    ⚠️ 只影响显示，不进任何玩法分支；CanvasModulate / PostFx 由抓帧脚本自己去关。
-var debug_flat := false
+## ⚠️ **已删 `debug_flat` / `--flat`**（M33 清理）：这个开关**从来没有被任何绘制代码读过** ——
+##    它只是被赋值，然后没人用（`--flat` 传了等于没传）。
+##    真正的"素色直出"是抓帧脚本自己做的：`tests/capture_frame.gd` 直接关掉
+##    CanvasModulate / CanvasLayer，和这个变量无关。
+##    ⇒ 一个"看起来能用、实际不生效"的开关，比没有更危险（会让人以为自己验过了）。
 var seal_panel: Control = null    # 命窍 / 炼化面板（在场景里，由 _ready 接线）
 var forge_panel: Control = null   # 合炼面板（在场景里，由 _ready 接线）
 var trade_panel: Control = null   # 交易面板（在场景里，由 _ready 接线）
@@ -101,16 +104,33 @@ var merchant = null               # 商人（代码建的，货架跟着世界�
 ## 货架：材料 -> 剩余。⭐ 它是**世界状态**：进快照、进存档（买过就少了，回溯会退回来）。
 var merchant_stock: Dictionary = {}
 
+## ⭐⭐ M34：**当前区域**（多区域骨架）。
+##    骨架期只有两个区：`cangwu`（本体现在这张图）+ `east_march`（复用同一张图，只验证链路）。
+##    ⚠️ 它是 Game 的状态而不是 GameData 的：切区要连带换相机边界、重画世界、停用旧区内容，
+##       这些都是 Game 的职责；GameData 只负责「当前区域派生出来的那几个量」。
+var current_region: String = GameData.START_REGION
+## 换区动画：0=空闲 1=淡出 2=淡入。⭐ 不用 tween —— 一个浮点计时更简单，也不受帧率影响。
+var _travel_to := ""
+var _travel_local := Vector2.ZERO
+var _travel_phase := 0
+var _travel_t := 0.0
+var _fade_rect: ColorRect = null
+## 淡出/淡入各占多少秒。0.28 ≈ 一次呼吸，够遮住「世界换了」那一帧，又不拖节奏。
+const TRAVEL_FADE := 0.28
+
 
 
 var _pass := 0
 var _fail := 0
+## ⭐ M33：失败断言的**名字**。控制台只留 200 行，580+ 条断言里末尾的失败会被缓冲丢掉 ——
+##    只记"失败 1 项"等于没告诉人哪里坏了。收尾时和计数一起写进 `.godot/selftest_result.txt`。
+var _fail_labels: Array = []
 
 ## ⭐ M31.3：自测**基线只看下界**。文档曾写 583、实测 584、grep 得 582 —— 三个数字打架的根因是
 ##    断言数本来就随代码增长而变。**锁死"恰好 584"是脆的**：谁加一条断言就红，谁删一条也红，
 ##    两种红长得一样，逼人去人工判断"是涨了还是跌了"—— 而人工判断正是会漏的环节。
 ##    所以只锁下界：只能涨不能跌。删断言 → 红；加断言 → 绿并打印实际值。
-const SELFTEST_MIN := 584
+const SELFTEST_MIN := 607
 ## 自测**有没有跑完**的标记（防假绿灯，见 `_selftest_finish()`）。
 var _st_started := false
 var _st_done := false
@@ -125,7 +145,14 @@ func _ready() -> void:
 	hud = $HudLayer/Hud
 	hud.game = self
 
+	# ⭐ M34：**先把当前区域装进 GameData**，再读任何 WORLD_* —— 否则读到的还是上一区的常量。
+	#    这一步必须在相机边界、_build_world、load_game 之前。
+	GameData.set_region(current_region)
 	camera = $Camera                 # 相机在场景里（边界在编辑器里看得见）
+	## ⭐ M33：**打开 y 排序** —— 装饰物（竹丛/岩石/石碑）要和玩家、敌人**互相遮挡**。
+	##    不打开的话，所有子节点按创建顺序画，站在竹子后面也会画在竹子上面。
+	##    ⚠️ 只影响绘制顺序，不参与任何判定；父节点自己的 `_draw`（整张地形）依然画在所有子节点之下。
+	y_sort_enabled = true
 	## ⭐ M30.25：**相机边界跟着世界走** —— 世界从 1280×720 变成 5120×2880，
 	##    边界原来写死在 .tscn 里（0/1280/0/720），不改就等于把人锁在左上角那口井里。
 	camera.limit_left = 0
@@ -142,6 +169,18 @@ func _ready() -> void:
 	#       真实状态一直是「开着且没崩」，只是注释没跟着改，把后来人吓住了。
 	#    ⚠️ 教训（架构要求）：**凡能变成断言的要求一律升级成断言** —— 注释会与代码脱节，断言不会。
 	_setup_post_fx()
+	# ⭐ M34：换区用的全屏黑幕。盖在 HUD 之上（layer 90），但**不吃鼠标** —— 面板照样能点。
+	var fade_layer := CanvasLayer.new()
+	fade_layer.name = "FadeLayer"
+	fade_layer.layer = 90
+	add_child(fade_layer)
+	_fade_rect = ColorRect.new()
+	_fade_rect.name = "TravelFade"
+	_fade_rect.color = Color(0.0, 0.0, 0.0, 0.0)
+	_fade_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	fade_layer.add_child(_fade_rect)
+	# Control 直接挂 CanvasLayer：锚点按**视口**算，所以 PRESET_FULL_RECT 就够。
+	_fade_rect.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	seal_panel = $HudLayer/SealPanel
 	seal_panel.closed.connect(_on_seal_panel_closed)
 	forge_panel = $HudLayer/ForgePanel
@@ -164,9 +203,6 @@ func _ready() -> void:
 	# ⭐ M31.3：前景遮挡开关（默认关）。放在自测分支**之前**，探针跑起来也能带上它。
 	if OS.get_cmdline_user_args().has("--foreground"):
 		_set_fg_occlusion(true)
-	# ⭐ M31.3：素色直出（`--flat`，抓帧测量专用，见 `debug_flat` 注释）。
-	if OS.get_cmdline_user_args().has("--flat"):
-		debug_flat = true
 	# ⭐ M31.3：**世界图签名** —— 重烘焙后启动即报警（自测里还有断言兜底，见 `_check_world_sig`）。
 	_check_world_sig()
 	# ⭐ M31.3：`--worldsig` = 重建基线。**这是唯一的更新路径**，见 `_regen_world_sig()`。
@@ -182,6 +218,14 @@ func _ready() -> void:
 		return
 
 	_build_world()
+	## ⭐ M34：手测钩子 —— `Godot --path . -- --region=east_march` 直接从另一个区开局。
+	##    没有它，换区只能靠「走到东边」；而东边那片是不是深水是烘焙出来的，不一定走得过去。
+	for arg in OS.get_cmdline_user_args():
+		var s := str(arg)
+		if s.begins_with("--region="):
+			var rid := s.substr(9)
+			if GameData.REGIONS.has(rid):
+				_apply_travel(rid, GameData.region_size(rid) * 0.5)
 	load_game()                      # 有存档就读回来（设锚时写的那一份）
 
 
@@ -213,8 +257,129 @@ func _build_world() -> void:
 		merchant_stock[str(entry["item"])] = int(entry["count"])
 	_spawn_merchant()
 
+	# ⭐ M33：装饰物层（竹丛 / 岩石 / 石碑 / 枯树 / 祭坛）——
+	#    「世界立起来了」靠的就是这一层：地形只有"地"，没有"物"。
+	_build_props()
+
 	# ⭐ 开局在出生点拍一张快照 = 设下「不可覆盖的初始锚点」（待决问题 3）
 	take_snapshot()                                  # 顺便拍下时间线第一帧 + 钉住锚帧
+
+
+# ==================== 区域切换（M34 骨架）====================
+
+## ⭐ 为什么先做「切换」而不是「无缝」：
+##    无缝要预取、边界连续性、实体跨区、掉落物跨区 —— 全是新系统；
+##    收益是玩家几乎感知不到的那 1.5 秒。先让**数据结构和存档**支持多区域，
+##    以后要无缝，改的是加载策略，不是存档格式。
+## ⚠️ 触发只认「贴边 + 按着那个方向」，**不认「坐标越界」**——
+##    `Player._clamp_world()` 先把人夹在区内，越界永远发生不了。
+func _check_region_exit() -> void:
+	if player == null or not is_instance_valid(player):
+		return
+	if _travel_phase != 0 or _travel_to != "":
+		return
+	var nbs := GameData.neighbors_of(current_region)
+	if nbs.is_empty():
+		return
+	var ws := GameData.region_size(current_region)
+	const MARGIN := 8.0
+	for dir4 in ["east", "west", "south", "north"]:
+		if not nbs.has(dir4):
+			continue
+		var at_edge := false
+		match dir4:
+			"east":
+				at_edge = player.position.x >= ws.x - MARGIN and Input.is_action_pressed("move_right")
+			"west":
+				at_edge = player.position.x <= MARGIN and Input.is_action_pressed("move_left")
+			"south":
+				at_edge = player.position.y >= ws.y - MARGIN and Input.is_action_pressed("move_down")
+			"north":
+				at_edge = player.position.y <= MARGIN and Input.is_action_pressed("move_up")
+		if not at_edge:
+			continue
+		var local := player.position
+		## 落到邻区的**对面一侧**，留 20px：否则一进来又贴着边，来回弹。
+		match dir4:
+			"east":
+				local.x = 20.0
+			"west":
+				local.x = ws.x - 20.0
+			"south":
+				local.y = 20.0
+			"north":
+				local.y = ws.y - 20.0
+		begin_travel(str(nbs[dir4]), local)
+		return
+
+
+## 开始一次换区（自测可以直接调它）。⚠️ 已经在换区途中就忽略 —— 不排队、不叠两次。
+func begin_travel(region_id: String, local_pos: Vector2) -> bool:
+	if _travel_phase != 0:
+		return false
+	if not GameData.REGIONS.has(region_id):
+		return false
+	_travel_to = region_id
+	_travel_local = local_pos
+	_travel_phase = 1
+	_travel_t = 0.0
+	_set_fade(0.0)
+	return true
+
+
+func _tick_travel(delta: float) -> void:
+	if _travel_phase == 0:
+		_check_region_exit()
+		return
+	_travel_t += delta
+	var k: float = clampf(_travel_t / TRAVEL_FADE, 0.0, 1.0)
+	if _travel_phase == 1:
+		_set_fade(k)
+		if k >= 1.0:
+			_apply_travel(_travel_to, _travel_local)
+			_travel_phase = 2
+			_travel_t = 0.0
+	else:
+		_set_fade(1.0 - k)
+		if k >= 1.0:
+			_travel_phase = 0
+			_travel_t = 0.0
+			_travel_to = ""
+
+
+func _set_fade(a: float) -> void:
+	if _fade_rect != null:
+		_fade_rect.color = Color(0.0, 0.0, 0.0, clampf(a, 0.0, 1.0))
+
+
+## 真正切过去：换数据 → 换相机边界 → 挪人 → 旧区内容隐身。
+## ⚠️ 顺序不能反：`GameData.set_region()` 必须**先于**任何读 WORLD_* 的东西，
+##    否则人会被旧区的边界夹一下（切换那一帧被弹回原区）。
+func _apply_travel(region_id: String, local_pos: Vector2) -> void:
+	if not GameData.set_region(region_id):
+		return
+	current_region = region_id
+	var ws := GameData.region_size(region_id)
+	camera.limit_left = 0
+	camera.limit_top = 0
+	camera.limit_right = int(ws.x)
+	camera.limit_bottom = int(ws.y)
+	player.position = local_pos
+	camera.global_position = local_pos
+	## ⭐ 骨架期：敌人 / 采集 / 商人 / 装饰全都烘焙在 cangwu 的坐标里，别的区先整体隐身。
+	##    等那个区有了自己的内容表，这里改成「按区生成 / 回收」。
+	_set_content_visible(region_id == GameData.START_REGION)
+	queue_redraw()
+	player.queue_redraw()
+
+
+## 只动「世界里的东西」，不碰玩家 / 相机 / UI 层。
+func _set_content_visible(on: bool) -> void:
+	for c in get_children():
+		if c == player or c is Camera2D or c is CanvasLayer:
+			continue
+		if c is Node2D:
+			(c as Node2D).visible = on
 
 
 ## 画世界：四个分区的底色 + 世界边框 + 区名。
@@ -223,29 +388,19 @@ func _build_world() -> void:
 ##    （项目有性能红线：_draw 里不许出现分配/字体/缓动）
 var _world_order: Array = []
 var _world_order_ready := false
-var _tile_cache: Dictionary = {}
-
-func _world_tile(path: String) -> Texture2D:
-	if not _tile_cache.has(path):
-		_tile_cache[path] = load(path) as Texture2D
-	return _tile_cache[path]
-
-func _world_tile_of(tn: String) -> Texture2D:
-	match tn:
-		"竹林": return _world_tile("res://art/tiles/grass.png")
-		"灵岩": return _world_tile("res://art/tiles/rock.png")
-		"灵田": return _world_tile("res://art/tiles/grass.png")
-		## ⭐ M31.3：泥沼还没有自己的贴图，先用草地底 + 调色顶着（见 `_world_tint_of`）。
-		##    等美术出图只要改这里一行，别的地方都不用动。
-		"泥沼": return _world_tile("res://art/tiles/grass.png")
-		_: return _world_tile("res://art/tiles/grass.png")
-
-func _world_tint_of(tn: String) -> Color:
-	match tn:
-		"竹林": return Color(0.60, 0.78, 0.60)      # 竹林 = 草地压暗偏绿（没有独立贴图，先靠调色）
-		"灵田": return Color(1.15, 1.18, 0.92)      # 灵田 = 偏黄
-		"泥沼": return Color(0.86, 0.80, 0.58)      # 泥沼 = 压暗偏黄褐（湿地，不是水：不偏蓝）
-		_: return Color(1.0, 1.0, 1.0)
+## ⚠️ **已删 `_world_tile(path)` / `_tile_cache`**（M33 清理）：全项目**零调用点**。
+##    它是早期「按路径取世界贴图」的缓存；世界渲染后来改成 `_auto_tile()`（按格 + 掩码 + 变体）
+##    之后，这个函数再没有人调用。删除前做了跨文件 grep 核实（只有定义、没有调用）。
+## ⚠️ 已删 `_world_tile_of(tn)`：全项目零调用点（早期按地形名取贴图的函数，后来被
+##    `_world_tint_of()` / `_auto_tile()` 那套取代）。删除前做了跨文件引用核实 ——
+##    真正不能删的「看起来像僵尸」的四个是 `execute_combo` / `nearest_enemy_to` /
+##    `spawn_swing` / `try_cultivate`（都由别的脚本 `game.xxx()` 调用），
+##    以及 `_draw_foreground()`（`ForegroundLayer.gd:19` 在调）。别照着名字误杀。
+## ⚠️ 已删 `_world_tint_of(tn)`：**「不要这么多地形」（M33 用户拍板）之后它没有对象了。**
+##    它的旧职责是"用地砖明暗/色偏给地形打标签"（竹林 0.60 / 灵田 1.15 / 泥沼 0.86…），
+##    而那正是拼布感的来源：同一张地砖乘不同系数 ⇒ 一块亮一块黑。
+##    现在画笔画的是**材质**（陆地 / 水，见 `_ground_mat()`），色偏由 `_ground_tint()` 一处算。
+##    ⚠️ 删除前做了跨文件引用核实：全项目只剩 `_ground_tint()` 一处调用点，没有别的脚本引用它。
 
 ## ⭐ M30.26：**实体激活半径**（interest management）—— 大世界真正该先做的一步。
 ##    地形已经有「只画可见格」的裁剪，但**实体**（敌人/掉落/采集点/假人）每个都在
@@ -322,7 +477,16 @@ func _setup_post_fx() -> void:
 func _setup_lighting() -> void:
 	var cm := CanvasModulate.new()
 	cm.name = "AmbientTint"
-	cm.color = Color(0.62, 0.66, 0.78)      # 压暗 + 偏冷（夜里/仙气的底子）
+	## ⭐ M33：**提亮到「黄昏」而不是「深夜」**。原来是 `Color(0.62, 0.66, 0.78)`，
+	##    和 32px 的地砖底色（`art/tiles/auto_*.png` 实测 RGB ≈ 20–40）相乘之后，
+	##    全屏像素落在 **20 个灰阶**以内 —— 草地 / 竹林 / 山岩在屏幕上读数几乎一样，
+	##    玩家看到的是一坨深绿糊，而不是「地形」。
+	##    ⇒ 氛围应当靠**局部亮**（灵光、阵法、灵泉）来造，不是靠**整体暗**。
+	##    ⚠️ 组件值 > 1 是有意的：这是**乘法亮度**，不是颜色，别「修正」回 0–1。
+	##    ⭐ M33：瓦片重做后底色亮了一档（0.08~0.12 → 0.09~0.22），环境光相应从 1.55 收回 1.00
+	##       —— 光照是**乘**上去的，换素材必须重调这一档，否则会一起发白。
+	##       （1.28 那版实测过：画面变成"正午草地"，仙气全无。宁可暗一点、冷一点。）
+	cm.color = Color(1.00, 1.06, 1.16)      # 冷调底子，但亮到能分辨地形
 	add_child(cm)
 	var tex: Texture2D = load("res://art/fx/light_radial.png") as Texture2D
 	if tex == null:
@@ -372,19 +536,42 @@ func _draw_world() -> void:
 var _auto_cache: Dictionary = {}
 
 
-func _auto_tile(tn: String, cx: int, cy: int) -> Texture2D:
+## ⭐ M33（用户拍板「不要这么多地形，全是平坦的地面」）：
+##    **画笔用的地面材质 ≠ 数据里的地形**。这两件事从今天起分开。
+##    数据里仍然是 6 种地形（水泽/草地/竹林/灵岩/灵田/泥沼）—— 它们决定采集产出、挡路、刷怪；
+##    但**画出来只有两种**：水、陆地。陆地一律用 `草地` 那套砖。
+##    ⇒ 地形边界那种"一块块拼布"的观感直接消失，整张地是连续的。
+##    ⇒ 区域性格改由**装饰物 + 地表碎屑**承担（竹林长竹子、灵岩长石头、泥沼长枯苇），
+##      这两条线本来就是按真实地形算的，不用改。
+##    ⚠️ 别把 `_ground_mat()` 和 `cell_terrain()` 搞混：那个是**玩法真相**，这个只是**画笔**。
+##      将来要做"多地形外观"，只改这里，玩法一行不动。
+func _ground_mat(tn: String) -> String:
+	if tn == "水泽":
+		return "水泽"
+	return "草地"
+
+
+func _auto_tile(mat: String, cx: int, cy: int) -> Texture2D:
 	var mask := 0
-	if GameData.in_map(Vector2i(cx, cy - 1)) and GameData.cell_terrain(cx, cy - 1) != tn:
+	if GameData.in_map(Vector2i(cx, cy - 1)) and _ground_mat(GameData.cell_terrain(cx, cy - 1)) != mat:
 		mask |= 1
-	if GameData.in_map(Vector2i(cx + 1, cy)) and GameData.cell_terrain(cx + 1, cy) != tn:
+	if GameData.in_map(Vector2i(cx + 1, cy)) and _ground_mat(GameData.cell_terrain(cx + 1, cy)) != mat:
 		mask |= 2
-	if GameData.in_map(Vector2i(cx, cy + 1)) and GameData.cell_terrain(cx, cy + 1) != tn:
+	if GameData.in_map(Vector2i(cx, cy + 1)) and _ground_mat(GameData.cell_terrain(cx, cy + 1)) != mat:
 		mask |= 4
-	if GameData.in_map(Vector2i(cx - 1, cy)) and GameData.cell_terrain(cx - 1, cy) != tn:
+	if GameData.in_map(Vector2i(cx - 1, cy)) and _ground_mat(GameData.cell_terrain(cx - 1, cy)) != mat:
 		mask |= 8
-	var key := tn + "_" + str(mask)
+	## ⭐ M33：**变体选择** —— 每种（材质 × 掩码）有 3 张纹样不同的图。
+	##    单张 32px 图铺满屏时，重复周期 = 32 世界px（@2× = 64 屏幕px），眼睛一眼能看出"格子"。
+	##    按格坐标哈希在 3 个变体里挑，周期变成 96px 且**不规则** —— 重复感基本消失。
+	##    ⚠️ 变体缺失时退回无变体文件（旧素材仍可用），再缺才返回 null 走纯色兜底。
+	var v := _cell_hash(cx, cy) % 3
+	var key := mat + "_" + str(mask) + "_" + str(v)
 	if not _auto_cache.has(key):
-		var p := "res://art/tiles/auto_" + tn + "_" + str(mask) + ".png"
+		var base_p := "res://art/tiles/auto_" + mat + "_" + str(mask)
+		var p := base_p + "_" + str(v) + ".png"
+		if not ResourceLoader.exists(p):
+			p = base_p + ".png"
 		_auto_cache[key] = (load(p) as Texture2D) if ResourceLoader.exists(p) else null
 	return _auto_cache[key]
 
@@ -392,20 +579,22 @@ func _auto_tile(tn: String, cx: int, cy: int) -> Texture2D:
 ## ⭐ M31.2：**接缝渐变** —— 在边界内侧叠两层「邻居色」（alpha 0.16 / 0.09）。
 ##    ⭐ 为什么不做 47-blob 那种全套变体：素材量与接线量成倍；
 ##    这里用"邻居色渐变"几行就拿到 80% 的效果，且不需要额外美术。
-func _blend_seams(r: Rect2, tn: String, cx: int, cy: int) -> void:
-	var w := 7.0
+func _blend_seams(r: Rect2, mat: String, cx: int, cy: int) -> void:
+	var w := 5.0                     # ⭐ M33：7 → 5（32px 的格子上，7px 是 1/4 格，读起来像"描边"）
 	for d9 in [[0, -1], [1, 0], [0, 1], [-1, 0]]:
 		var nx: int = cx + int(d9[0])
 		var ny: int = cy + int(d9[1])
 		if not GameData.in_map(Vector2i(nx, ny)):
 			continue
 		var nt := GameData.cell_terrain(nx, ny)
-		if nt == tn:
+		## ⭐ M33：比的是**材质**不是地形 —— 陆地统一之后，草地/竹林之间不该再有接缝色
+		##    （有的话就等于又画了一遍"拼布"）。现在只有「陆地 ↔ 水」这一条边界会走到这里。
+		if _ground_mat(nt) == mat:
 			continue
-		var nc: Color = GameData.WORLD_TERRAIN_COLORS.get(nt, Color(0.2, 0.2, 0.2))
+		var nc := Color(0.10, 0.16, 0.24) if nt == "水泽" else Color(0.16, 0.20, 0.15)
 		for layer in range(2):
 			var ww := w * (1.0 - 0.45 * float(layer))
-			var a := 0.16 - 0.07 * float(layer)
+			var a := 0.12 - 0.05 * float(layer)      # ⭐ M33：0.16/0.09 → 0.12/0.07（黑边再压淡一档）
 			var col := Color(nc.r, nc.g, nc.b, a)
 			if int(d9[1]) < 0:
 				draw_rect(Rect2(r.position, Vector2(r.size.x, ww)), col)
@@ -453,23 +642,138 @@ func _draw_world_height() -> void:
 		var at := Vector2(float(cx) * cell, float(cy) * cell - e * GameData.ELEV_LIFT)
 		var r := Rect2(at, Vector2(cell, cell))
 		var tn := GameData.cell_terrain(cx, cy)
+		var gm := _ground_mat(tn)          # ⭐ M33：画笔看到的是材质，不是地形
 		var tex: Texture2D = null
-		if tn == "水泽":
+		if gm == "水泽":
 			# 水：按深浅上色（深 = 暗）。真正的 autotile 水岸是下一批
 			var d := GameData.cell_depth(cx, cy)
-			draw_rect(r, Color(0.12, 0.26, 0.40).lerp(Color(0.04, 0.11, 0.22), d))
+			# ⭐ M33：水面也要吃大尺度斑块，否则一整片纯色（现在是**唯一的**一片平色区域）
+			var wk := _patch_k(cx, cy)
+			draw_rect(r, Color(0.12, 0.26, 0.40).lerp(Color(0.04, 0.11, 0.22), d) * wk)
 		else:
 			## ⭐ M31.2（P1）：**接缝处理** —— 两件事一起做才不"像色块"：
-			##    ① 用 autotile 变体（`auto_<地形>_<掩码>.png`）：需要画边的那侧有暗边+内亮边
+			##    ① 用 autotile 变体（`auto_<材质>_<掩码>.png`）：需要画边的那侧有暗边
 			##    ② 在边界内侧叠 2 层**邻居色**的低透明渐变 → 颜色是"过渡"过去的，不是硬切
-			tex = _auto_tile(tn, cx, cy)
+			##    ⭐ M33：材质统一成「陆地」之后，陆地内部不再有边、也不再有接缝色 ——
+			##      整张地是连续的，只有水岸还保留这两层处理。
+			tex = _auto_tile(gm, cx, cy)
 			if tex != null:
-				draw_texture_rect(tex, r, false, _world_tint_of(tn))
+				## ⭐ M33：`_world_tint_of` → `_ground_tint`（后者多乘一层大尺度斑块）
+				draw_texture_rect(tex, r, false, _ground_tint(gm, cx, cy))
 			else:
-				draw_rect(r, GameData.WORLD_TERRAIN_COLORS.get(tn, Color(0.16, 0.20, 0.16)))
-			_blend_seams(r, tn, cx, cy)
+				draw_rect(r, GameData.WORLD_TERRAIN_COLORS.get(tn, Color(0.16, 0.20, 0.16)) * _patch_k(cx, cy))
+			_blend_seams(r, gm, cx, cy)
+		## ⭐ M33：碎屑层 —— 按**真实地形**画（草叶/竹叶/枯苇/灵苗），这是现在
+		##    「这块地是什么」唯一的地面线索，所以它比地形贴图更值得保留。
+		_draw_decor(at, cx, cy, tn)
 		# ⭐ M30.13e（用户定案）：**不再画崖壁竖面** —— 那些灰墙看着像地图上乱摆的障碍。
 		#    高度还在（每格按海拔偏移 + 低的先画高的后画 = 遮挡），只是不画"墙"了。
+
+## ⭐ M33：**格坐标哈希** —— 定义搬到了 `GameData.cell_hash()`（单一真相，见那里的注释）。
+##    这里保留一个薄封装，只是为了 `_draw` 里少写几个字符、读起来像本地工具。
+func _cell_hash(cx: int, cy: int) -> int:
+	return GameData.cell_hash(cx, cy)
+
+
+## ⭐ M33：**大尺度明暗斑块**（±11%）—— 「地毯感」的第一号解药。
+##
+## 为什么需要：整张地图是同一张 32px 图重复上万次，每格亮度完全一致 ⇒ 眼睛读到的是
+##    "墙纸"，不是"地"。真实地面在**几米尺度**上本来就有深浅（草皮、干湿、土色）。
+##    这里给每 **8×8 格**一个哈希值当"地势色差"，再叠每格 ±3% 的抖动。
+##
+## ⚠️ 三条纪律：
+##   ① **零额外绘制调用**：不新画任何东西，只把系数乘进 modulate（那一层本来就每格乘一次）。
+##   ② 幅度必须小（±11%）：超过 ±20% 就开始像"打光斑"，而不是地貌。
+##   ③ **同一块必须用同一个值**（`cx >> 3`）：逐格独立随机只会变成更细的噪点，不是斑块 ——
+##      这是这一层和"加噪声"的本质区别。
+func _patch_k(cx: int, cy: int) -> float:
+	var b := _cell_hash(cx >> 3, cy >> 3)
+	var block := (float(b % 1000) / 1000.0 - 0.5) * 0.22      # ±11%
+	var s := _cell_hash(cx, cy)
+	var fine := (float(s % 1000) / 1000.0 - 0.5) * 0.06       # ±3%
+	return 1.0 + block + fine
+
+
+## 地面亮度 × 大尺度斑块。⭐ 只是把系数乘进 modulate，不缓存 —— 一帧几百格，够便宜。
+## ⚠️ M33：`_mat` 现在**没有用到** —— 这正是「全是平坦的地面」想要的效果：
+##    地面上所有的明暗变化都来自**地势斑块**，不再有"这块地因为地形不同而更亮/更暗"的人造分区。
+##    参数留着是为了将来若要按材质做色偏（比如把水岸的泥沙调暖），不必再改签名和全部调用点。
+func _ground_tint(_mat: String, cx: int, cy: int) -> Color:
+	var k := _patch_k(cx, cy)
+	return Color(k, k, k, 1.0)
+
+
+## ⭐ M33：**地表碎屑层** —— 草叶 / 石子 / 落叶 / 裂缝 / 灵苗 / 枯苇。
+##    这是「地毯感」的第二号解药：真实的地不是一张连续的噪声，而是**散落着不重复的小东西**。
+##
+## ⚠️ 三条纪律（和项目既有红线一致）：
+##   ① 位置全部由格坐标哈希决定 —— 同一格每帧画同一根草，不闪、不分配。
+##   ② 只装饰约 **1/3** 的格子：眼睛只需要"密度不均匀"，装饰率拉到 100% 反而变成新噪声。
+##   ③ 亮度只比底色高**一档**（+15~30%）：碎屑是细节，不是高光；一亮就变成脏点。
+##   ④ 水泽**不画**：水下碎屑读不出来，水面的表现留给波纹层（下一步）。
+func _draw_decor(at: Vector2, cx: int, cy: int, tn: String) -> void:
+	if tn == "水泽":
+		return
+	var h := _cell_hash(cx, cy)
+	## ⭐ 密度必须**按 4×4 块起伏**，不能逐格均匀 ——
+	##    均匀密度 = 一张规则点阵（第一版就是这样，看起来像撒了彩色纸屑）。
+	##    真实地面是「这一片草密、那一片几乎光秃」，疏密本身就是地貌信息。
+	var bh := _cell_hash(cx >> 2, cy >> 2)
+	var density := 78 if bh % 100 < 70 else 26        # 70% 的块稀疏 / 30% 的块茂密
+	if h % 100 >= density:
+		return
+	# 在格子内偏移（留 3px 边，免得碎屑压到接缝上，看起来像"流边"）
+	var u := float((h >> 8) % 997) / 997.0
+	var v := float((h >> 18) % 991) / 991.0
+	var p := at + Vector2(3.0 + u * 25.0, 5.0 + v * 22.0)
+	match tn:
+		"草地":
+			match h % 3:
+				0:                                  # 三根草叶（高矮错开才像草，等长像刺）
+					draw_line(p, p + Vector2(-2.0, -4.0), Color(0.22, 0.31, 0.18), 1.0)
+					draw_line(p, p + Vector2(0.5, -5.0), Color(0.25, 0.35, 0.20), 1.0)
+					draw_line(p, p + Vector2(2.0, -3.0), Color(0.20, 0.28, 0.17), 1.0)
+					## 茂密的块里再补一小簇 —— 「簇」是密度感的来源，单根草只会像点
+					if density == 78:
+						var q := p + Vector2(5.0, 2.0)
+						draw_line(q, q + Vector2(-1.0, -3.0), Color(0.21, 0.30, 0.17), 1.0)
+						draw_line(q, q + Vector2(1.0, -4.0), Color(0.24, 0.34, 0.19), 1.0)
+				1:                                  # 小石子：上亮下暗 = 一点体积感
+					## ⚠️ 石子必须**贴近底色**：第一版用了 0.28/0.34，在 0.15 的地面上是
+					##    两倍亮度 ⇒ 满屏白点，像 UI 标记而不是石头。
+					draw_rect(Rect2(p, Vector2(2.0, 2.0)), Color(0.20, 0.21, 0.18))
+					draw_rect(Rect2(p, Vector2(2.0, 1.0)), Color(0.24, 0.25, 0.21))
+				_:                                  # 枯草根（低饱和 —— 鲜花抢戏，这里刻意不用）
+					draw_line(p, p + Vector2(1.0, -3.0), Color(0.24, 0.22, 0.14), 1.0)
+					draw_line(p + Vector2(1.0, -1.0), p + Vector2(3.0, -3.0), Color(0.21, 0.19, 0.12), 1.0)
+		"竹林":
+			# 竹叶是**细长**的：两道斜短线，比圆点像得多
+			draw_line(p, p + Vector2(4.0, -2.0), Color(0.24, 0.28, 0.13), 1.0)
+			draw_line(p + Vector2(1.0, 2.0), p + Vector2(5.0, 0.0), Color(0.20, 0.24, 0.11), 1.0)
+		"灵岩":
+			if h % 2 == 0:
+				# 裂缝：暗线 + 折一次（直裂像划痕，折线才像岩石裂开）
+				draw_line(p, p + Vector2(2.0, 3.0), Color(0.09, 0.09, 0.10), 1.0)
+				draw_line(p + Vector2(2.0, 3.0), p + Vector2(5.0, 4.0), Color(0.10, 0.10, 0.11), 1.0)
+			else:
+				draw_rect(Rect2(p, Vector2(4.0, 3.0)), Color(0.21, 0.20, 0.22))
+				draw_rect(Rect2(p, Vector2(4.0, 1.0)), Color(0.26, 0.25, 0.28))
+		"灵田":
+			# 灵苗：一株小苗 + 叶尖一点更亮的绿。**不发光** —— 发光要留给灵泉/阵法
+			draw_line(p, p + Vector2(0.0, -4.0), Color(0.32, 0.36, 0.17), 1.0)
+			draw_rect(Rect2(p + Vector2(-1.0, -4.0), Vector2(2.0, 1.0)), Color(0.38, 0.43, 0.20))
+			if h % 3 == 0:
+				draw_rect(Rect2(p + Vector2(1.0, -6.0), Vector2(1.0, 1.0)), Color(0.46, 0.50, 0.25))
+		"泥沼":
+			if h % 2 == 0:
+				# 枯苇：下垂的细线
+				draw_line(p, p + Vector2(0.0, -5.0), Color(0.20, 0.17, 0.09), 1.0)
+				draw_line(p + Vector2(0.0, -3.0), p + Vector2(2.0, -5.0), Color(0.17, 0.14, 0.07), 1.0)
+			else:
+				# 沼气小泡：暗底 + 亮边（泥沼的"活"感，别让它看起来是一块死土）
+				draw_rect(Rect2(p, Vector2(2.0, 2.0)), Color(0.29, 0.25, 0.12))
+				draw_rect(Rect2(p + Vector2(1.0, -1.0), Vector2(2.0, 1.0)), Color(0.34, 0.29, 0.13))
+
 
 ## ⚠️ 保险：世界数据缺失（图没导入 / 路径写错）就退回平铺渲染 —— 不让一张图把世界画崩
 func _draw_world_flat() -> void:
@@ -538,6 +842,63 @@ func _spawn_merchant() -> void:
 	#    快照恢复时才不用管「换没换过对象」。
 	merchant.stock = merchant_stock
 	add_child(merchant)
+
+
+## ⭐ M33：**铺装饰物** —— 按地形决定"这里长什么"，位置由格坐标哈希决定（静态、可复现）。
+##
+## ⚠️ 密度是**刻意稀疏**的：约每 12 格竹林才长一丛竹子。程序生成最容易犯的错是铺满 ——
+##    铺满之后玩家反而看不见地面，也就看不见"这里是什么地形"，比空着更乱。
+## ⚠️ 位置在格子内做哈希偏移：所有的物件都落在格心，会排出整齐的行列，
+##    那一眼就是"程序生成的"。
+func _build_props() -> void:
+	var cell := GameData.WORLD_CELL
+	var n := 0
+	for cy in range(GameData.WORLD_ROWS):
+		for cx in range(GameData.WORLD_COLS):
+			var kind := _prop_kind_at(cx, cy)
+			if kind == "":
+				continue
+			var h := GameData.cell_hash(cx, cy)
+			var pr = PropsScript.new()
+			pr.game = self
+			pr.setup(kind, h)
+			var jitter := Vector2(6.0 + float((h >> 4) % 20), 10.0 + float((h >> 9) % 18))
+			pr.position = Vector2(float(cx) * cell, float(cy) * cell) + jitter
+			add_child(pr)
+			n += 1
+	# 出生点的祭坛：给世界中心一个可辨认的地标，也顺便验证 y 排序（人站上去应盖住坛心）
+	var altar = PropsScript.new()
+	altar.game = self
+	altar.setup("altar", 0)
+	altar.position = spawn_point + Vector2(0.0, -110.0)
+	add_child(altar)
+	print("[M33] 装饰物 %d 件 + 祭坛 1 座" % n)
+
+
+## 某格"长什么"。返回 "" = 什么都不长。
+## ⚠️ 这里的概率是**逐格**的，改之前先换算成"全图多少件"再决定 ——
+##    逐格 1/12 听起来很稀，乘以上万格就是几百件。
+func _prop_kind_at(cx: int, cy: int) -> String:
+	var h := GameData.cell_hash(cx, cy)
+	match GameData.cell_terrain(cx, cy):
+		"竹林":
+			if h % 12 == 0:
+				return "bamboo"
+		"灵岩":
+			if h % 311 == 0:
+				return "stele"          # 石碑极稀有：地标要"偶遇"，不能像路灯
+			if h % 26 == 0:
+				return "rock"
+		"草地":
+			if h % 130 == 0:
+				return "rock"
+		"泥沼":
+			if h % 42 == 0:
+				return "deadtree"
+		"灵田":
+			if h % 95 == 0:
+				return "shrub"
+	return ""
 
 
 func _spawn_gather(pos: Vector2, item: String, amount: int) -> void:
@@ -624,6 +985,16 @@ func _tick_juice(delta: float) -> void:
 			if float(s["t"]) < float(s["life"]):
 				keep_s.append(s)
 		swings = keep_s
+		queue_redraw()
+
+	# ⭐ M33：命中冲击同理 —— 短命的表现层，寿命到了就丢
+	if not impacts.is_empty():
+		var keep_i: Array = []
+		for im in impacts:
+			im["t"] = float(im["t"]) + delta
+			if float(im["t"]) < float(im["life"]):
+				keep_i.append(im)
+		impacts = keep_i
 		queue_redraw()
 
 	# 命中停顿：用真实时间判定结束（不受 time_scale 影响），到点就放回去
@@ -995,11 +1366,11 @@ func summoned_seals() -> Array:
 	return player.summoned_seals()
 
 
-## ⚠️ M28：回溯已移除。这个函数只是**兼容旧测试里的调用** ——
-##    现在死亡会**同步立即**完成复活（见 _on_player_died），所以这里是个空操作。
-##    等旧测试都改成直接调 take_damage 之后，这个壳就删掉。
-func _on_rewind_chosen(_index: int) -> void:
-	pass
+## ⚠️ **已删 `_on_rewind_chosen()`**（M33 清理）：这是 M28 移除回溯后留下的**空壳**，
+##    函数体只有一个 `pass`，只被旧测试调用 —— 调用它等于什么都没做。
+##    ⚠️ 删之前核实过：那些测试真正驱动死亡的是各自的 `player.take_damage()`，
+##    复活在 `_on_player_died()` 里**同步**完成，不依赖这个壳。
+##    13 处调用点一并删掉（不是注释掉 —— 留着注释只会变成新的"看起来还在跑"的假线索）。
 
 
 ## 主角死亡（M28：回溯已移除 —— 现在是最朴素的「回到上次存档」）。
@@ -1099,58 +1470,119 @@ func _dist_to_segment(p: Vector2, a: Vector2, b: Vector2) -> float:
 
 # ==================== 伤害判定 ====================
 
-## ⭐ M30.7：掌风弧光。Player 在**前摇开始**时喊这一次 —— 它不参与判定，
+## ⭐ M30.7：**前摇提示**。Player 在**前摇开始**时喊这一次 —— 它不参与判定，
 ##    纯粹是「我要打了」的可读信号（0.15 秒后才真的掉血，见 Player._strike）。
-##    ⚠️ 将来 M31 做特效层时，这条和 hits 一起搬进 Fx.gd —— 现在先留在主控里。
+##    ⚠️ M33：内容从「掌风弧光」换成了「手心聚气」（见 `_draw_swings`），函数名保留。
+##    ⚠️ 将来做特效层时，这条和 hits 一起搬进 Fx.gd —— 现在先留在主控里。
 func spawn_swing(center: Vector2, dir: Vector2) -> void:
 	swings.append({"center": center, "dir": dir, "t": 0.0,
-			"life": float(GameData.ATTACK["arc"]["life"])})
+			"life": float(GameData.ATTACK["qi"]["life"])})
 	queue_redraw()
 
 
-## 生成一个短命伤害区，并立刻结算命中。
-## 返回命中了几个目标 —— 自测就是靠这个返回值判断对错的。
+## ⭐ M33（用户定案「伤害跟随」）：普攻不再是"抬手那一下把整条线扫一遍"，
+##    而是**一股气在飞，扫到谁才算谁**。所以这里只**创建**这股气，返回 0。
+##
+## ⚠️ 这是**行为改变**，不是纯表现：伤害发生的**时刻**从「抬手」变成了「气飞到那儿」。
+##    所以凡是调用 `spawn_hit()` 的地方，都必须再让时间往前走（`_advance_hits` / 真实帧），
+##    否则伤害永远不会发生。自测里三处调用点已全部改成「先 spawn、再推进」。
+##
+## ⚠️ `dir` 可能是零向量（朝向没初始化），必须兜一个 RIGHT —— 归一化零向量会得到零，
+##    后面 `along/side` 全变成 0，气就"永远停在原地还打不到人"。
 func spawn_hit(center: Vector2, dir: Vector2, length: float, width: float, dmg: float) -> int:
-	var n := 0
-	# 用 duplicate()：下面可能删假人，不能一边遍历一边改原数组
-	for d in dummies.duplicate():
-		if not is_instance_valid(d):
-			continue
-		if _in_attack_area(d.position, center, dir, length, width):
-			d.take_damage(dmg)
-			n += 1
-			if d.hp <= 0.0:
-				_remove_dummy(d)
-
-	# 敌人也吃这一刀。⭐ 和假人共用同一个 _in_attack_area —— 判定规则只有一处
-	for e in enemies.duplicate():
-		if not is_instance_valid(e) or not e.is_alive():
-			continue
-		if _in_attack_area(e.position, center, dir, length, width):
-			e.take_damage(dmg)      # 打死的话它自己会 emit died，由 _on_enemy_died 移除
-			n += 1
-			# ⭐ M30.7：轻微击退（没死才推 —— 死了马上就消失了，推它没意义）
-			if is_instance_valid(e) and e.is_alive():
-				e.position += dir.normalized() * float(GameData.ATTACK["knockback"])
-
+	var d := dir.normalized() if dir.length_squared() > 0.0001 else Vector2.RIGHT
 	hits.append({
-		"center": center, "dir": dir, "length": length, "width": width,
+		"center": center, "dir": d, "length": length, "width": width,
 		"t": 0.0, "life": float(GameData.ATTACK["life"]),
+		"damage": dmg,
+		"head": 0.0,          # 气头已经推进到多远（从起点算，0..length）
+		"hit": {},            # 已经打过的目标（instance_id → true），保证一次普攻只打一下
 	})
 	queue_redraw()
+	return 0
+
+
+## ⭐ M33：**推进所有飞行中的气**，并结算这一帧"扫过"的那一段。
+##    返回这一帧新命中几个目标 —— 自测靠它判断"扫过之后确实打到了"。
+##    ⚠️ 每帧不只推 t，还要算「上一帧头在哪 → 这一帧头在哪」，只打这段区间里的目标；
+##      否则目标从区间里"跳过去"（帧间隔大时）会漏判。
+func _advance_hits(delta: float) -> int:
+	if hits.is_empty():
+		return 0
+	var n := 0
+	var keep: Array = []
+	for h in hits:
+		var life := maxf(float(h["life"]), 0.001)
+		var prev := float(h["head"])
+		h["t"] = float(h["t"]) + delta
+		## 和 `_draw_qi` 用**同一个**推进公式 —— 表现与判定必须落在同一条线上，
+		## 两边各写一套的话，眼睛看到的头和气实际打到的位置会慢慢错开。
+		var p := clampf(float(h["t"]) / life, 0.0, 1.0)
+		var head := float(h["length"]) * (1.0 - pow(1.0 - p, 2.0))
+		n += _sweep(h, prev, head)
+		h["head"] = head
+		if float(h["t"]) < life:
+			keep.append(h)
+	hits = keep
 	return n
 
 
-## 判断一个点是否落在「以 center 为中心、朝向 dir、长 length 宽 width」的矩形里。
-##
-## 做法：把点换算到**攻击者自己的坐标系**——沿朝向走多远 + 偏离朝向多少。
-## 这样就不用真的去旋转矩形了。
-## ⭐ 这套算法将来加「扇形」时，只要再比一个角度就行，不用推倒重来。
-func _in_attack_area(p: Vector2, center: Vector2, dir: Vector2, length: float, width: float) -> bool:
-	var rel := p - center
-	var along := rel.dot(dir)                        # 正值 = 在攻击区前方
-	var side := rel.dot(Vector2(-dir.y, dir.x))      # 垂直于朝向的分量
-	return absf(along) <= length * 0.5 and absf(side) <= width * 0.5
+## 结算「[from_d, to_d] 这一小段」扫到的目标。同一个目标一次普攻只吃一下（看 `hit` 表）。
+func _sweep(h: Dictionary, from_d: float, to_d: float) -> int:
+	var dir: Vector2 = h["dir"]
+	var start: Vector2 = (h["center"] as Vector2) - dir * float(h["length"]) * 0.5
+	var half_w := float(h["width"]) * 0.5
+	var dmg := float(h["damage"])
+	var hitmap: Dictionary = h["hit"]
+	var n := 0
+	# 用 duplicate()：下面可能删假人/敌人，不能一边遍历一边改原数组
+	for d in dummies.duplicate():
+		if not is_instance_valid(d) or hitmap.has(d.get_instance_id()):
+			continue
+		if _in_sweep(d.position, start, dir, from_d, to_d, half_w):
+			hitmap[d.get_instance_id()] = true
+			d.take_damage(dmg)
+			add_impact(d.position)
+			n += 1
+			if d.hp <= 0.0:
+				_remove_dummy(d)
+	for e in enemies.duplicate():
+		if not is_instance_valid(e) or not e.is_alive() or hitmap.has(e.get_instance_id()):
+			continue
+		if _in_sweep(e.position, start, dir, from_d, to_d, half_w):
+			hitmap[e.get_instance_id()] = true
+			e.take_damage(dmg)      # 打死的话它自己会 emit died，由 _on_enemy_died 移除
+			add_impact(e.position)
+			n += 1
+			# ⭐ M30.7：轻微击退（没死才推 —— 死了马上就消失了，推它没意义）
+			if is_instance_valid(e) and e.is_alive():
+				e.position += dir * float(GameData.ATTACK["knockback"])
+	return n
+
+
+## 点是否落在「气这一帧扫过的薄片」里。
+## along 是沿朝向的距离（从气起点算），必须在 [from, to] 内 —— 这就是"打到哪算哪"；
+## side 是横向偏移，只受宽度限制。
+## ⚠️ 两边各留 8px 余量：目标是一个**点**（position），而人是有体积的；
+##    不留余量的话，贴着线边缘走过去的目标会"看起来明明打到了却没掉血"。
+func _in_sweep(p: Vector2, start: Vector2, dir: Vector2, from_d: float, to_d: float, half_w: float) -> bool:
+	var rel := p - start
+	var along := rel.dot(dir)
+	var side := rel.dot(Vector2(-dir.y, dir.x))
+	return along >= from_d - 8.0 and along <= to_d + 8.0 and absf(side) <= half_w + 8.0
+
+
+## ⭐ M33：**命中冲击** —— 气打到人身上弹出的那一圈。
+##    为什么不画在目标身上而是画在**命中点**：让人读出"气在这里撞上了东西"，
+##    而不是"这个人身上本来就有个圈"。
+func add_impact(pos: Vector2) -> void:
+	impacts.append({"pos": pos, "t": 0.0, "life": 0.18})
+
+
+## ⚠️ **已删 `_in_attack_area(p, center, dir, length, width)`**（M33 清理）：
+##    它是"点在旋转矩形内"的旧普攻判定。改成「伤害跟随」之后，判定换成 `_in_sweep()`
+##    （只打"气这一帧扫过的那一段"），这个函数变成**零调用点**。
+##    ⚠️ 删除前跨文件 grep 核实：只有本文件里的注释提到它，没有任何代码调用。
 
 
 func _remove_dummy(d: Dummy) -> void:
@@ -1255,29 +1687,32 @@ func _process(delta: float) -> void:
 	if fg_occlusion and fg_layer != null:
 		fg_layer.queue_redraw()
 
+	# ⭐ M34：区域切换（贴边继续推 → 淡出 → 换区 → 淡入）。
+	#    放在相机跟随之后：这一刻 player.position 已经是本帧的新位置。
+	_tick_travel(delta)
+
 	# 掉落物自动拾取 + 提示计时（M8）。⭐ 同样要在下面那个短路之前
 	_tick_pickups(delta)
 
-	# ⭐ M19/M27：定期自动存档（每 autosave_sec 一次 —— 现在是 10 分钟）
-	#    ⚠️ 间隔一拉长，"退出时存一次"就变成了主力：窗口直接关掉会走 _notification 存盘。
-	#    另外死亡回溯也会写盘，所以死亡这条路永远是安全的。
-	_autosave_timer += delta
-	if _autosave_timer >= float(GameData.ANCHOR["autosave_sec"]):
-		_autosave_timer = 0.0
-		save_now()
+	## ⭐ M19/M27：定期自动存档。
+	## ⚠️ M33（用户定案）：`autosave_sec = 0` = **关闭** —— 见 `GameData.ANCHOR` 的注释。
+	##    守卫必须放在**累加之前**：否则计时器会一直涨，改回正整数的那一刻会立刻存一次
+	##    （而且是在你改完代码、还没想好要存的时候）。
+	##    区间外仍会写盘的两条路径：关窗口（`_notification`）、主角死亡（`_on_player_died`）。
+	var auto_secs := float(GameData.ANCHOR["autosave_sec"])
+	if auto_secs > 0.0:
+		_autosave_timer += delta
+		if _autosave_timer >= auto_secs:
+			_autosave_timer = 0.0
+			save_now()
 
 	# 打击感：飘字上浮 + 震屏衰减。⭐ 同样必须在下面那个短路之前
 	_tick_juice(delta)
 	_tick_activation()      # ⭐ M30.26：远处的实体休眠（大世界真正该先做的那件事）
 
-	# 短命伤害区：寿命到了就丢掉，不然会一直堆在内存里
-	if not hits.is_empty():
-		var keep: Array = []
-		for h in hits:
-			h["t"] = float(h["t"]) + delta
-			if float(h["t"]) < float(h["life"]):
-				keep.append(h)
-		hits = keep
+	## ⭐ M33：**推动所有飞行中的气** —— 伤害在这里发生（不是抬手那一下）。
+	##    每帧推进 + 结算"这一帧扫过的那一段"，寿命到了自然从数组里消失。
+	_advance_hits(delta)
 	# ⭐ M31.3（重烘焙收尾时抓帧抓出来的真 bug）：queue_redraw 必须**每帧**调。
 	#    原来它被塞在 `if hits.is_empty(): return` 的后面 —— 不打架就整帧不重画，
 	#    `_draw()` 的绘制命令被引擎缓存复用，而 `_draw_world_height()` 里的 vis_r
@@ -1302,25 +1737,17 @@ func _draw() -> void:
 	_draw_world()
 	_draw_swings()
 
-	# 把伤害区画出来。不给玩家看见，他就不知道自己的攻击范围到底有多大。
+	# ⭐ M33（用户定案）：**判定框不再画**。
+	##    原来这里是一个旋转矩形的 `draw_colored_polygon` + 描边 —— 那是**调试用的框**，
+	##    玩家看到的是"我面前浮着一个方框"，而不是"我把气打出去了"。
+	##    现在每个伤害区画成一道沿直线飞出去的气（见 `_draw_qi`）。
+	##    ⚠️ 只换了**画法**：判定仍然是 `_in_sweep()`（气这一帧扫过的那一段），
+	##      表现和判定是两件事 —— 这条从 M30.7 起就是项目纪律。
 	for h in hits:
-		var c: Vector2 = h["center"]
-		var d: Vector2 = h["dir"]
-		var perp := Vector2(-d.y, d.x)               # 垂直于朝向的方向
-		var hl := float(h["length"]) * 0.5
-		var hw := float(h["width"]) * 0.5
-		var k := 1.0 - clampf(float(h["t"]) / maxf(float(h["life"]), 0.001), 0.0, 1.0)
+		_draw_qi(h)
 
-		var p0 := c + d * hl + perp * hw
-		var p1 := c + d * hl - perp * hw
-		var p2 := c - d * hl - perp * hw
-		var p3 := c - d * hl + perp * hw
-		# ⭐ M30.7：判定框**弱化成幽灵** —— 它现在只负责「看得清打到哪」，
-		#    主视觉交给掌风弧光。用户要求「未命中就别花哨」，所以压到几乎只剩描边。
-		draw_colored_polygon(PackedVector2Array([p0, p1, p2, p3]),
-				Color(0.95, 0.85, 0.45, 0.09 * k))
-		draw_polyline(PackedVector2Array([p0, p1, p2, p3, p0]),
-				Color(1.0, 0.92, 0.55, 0.30 * k), 1.5)
+	# ⭐ M33：命中冲击画在气之后、飘字之前 —— 圈要在数字底下，不然会挡住伤害数字
+	_draw_impacts()
 
 	# 伤害数字：往上飘 + 淡出（世界坐标，所以会跟着相机走）
 	for n in numbers:
@@ -1339,9 +1766,6 @@ func _draw() -> void:
 	#    打开开关后由 z_index=64 的 `FgLayer` 子节点来画，才落在人之后。
 
 
-## ⭐ M30.7：掌风弧光。一个**月牙**（外弧 + 内弧拼成的环形扇面）朝朝向扫出去 ——
-##    「掌心凝灵、拍出一掌」的气流，不是刀光（主角不持武器）。
-##    ⚠️ 纯表现：它和 `hits`（判定）是**两件事**，判定永远只看 hits。
 ## ⭐ M30.22：**前景遮挡层** —— 这是 HD-2D「立体书感」最便宜的一步（不用换渲染器、不用新美术）。
 ##    做法：竹林格的**树冠**在角色之后绘制（同 CanvasItem 后画 = 盖在上面），
 ##    玩家走进竹林时上半身被树冠遮住；走出竹林就露出来。
@@ -1387,32 +1811,110 @@ func _draw_foreground(target: CanvasItem) -> void:
 					target.draw_line(Vector2(lx, ly), Vector2(lx + dir9 * 9.0, ly + 4.0), Color(0.23, 0.40, 0.21, 0.92), 1.5)
 
 
+## ⭐ M33：**普攻的表现** —— 一道气沿直线打出去。
+##
+## 为什么不再画判定框：框是**给调参的人看的**，不是给玩家看的。
+##    玩家要读的是「我把气打出去了」，不是「我的攻击范围是一个矩形」。
+##
+## ⚠️ 两条纪律：
+##   ① 判定**仍然**是 `_in_sweep()`（气这一帧扫过的那一段），这里只管画 —— 表现和判定分开。
+##   ② 宽度必须**分层**（外晕 9px / 主体 4px / 芯 1.6px）：一根等宽的线读起来是"射线/激光"，
+##      有粗细差才像"气"。这一条是这类效果最容易被忽略、也最影响观感的地方。
+func _draw_qi(h: Dictionary) -> void:
+	var c: Vector2 = h["center"]
+	var dir: Vector2 = h["dir"]
+	var length := float(h["length"])
+	var p := clampf(float(h["t"]) / maxf(float(h["life"]), 0.001), 0.0, 1.0)
+	## ⚠️ 淡出**不能线性**：`1 - p` 会让气流刚飞出去就发灰，到 90% 时几乎看不见，
+	##    观感是"这口气没劲"。改成前 65% 满强度、最后 1/3 才散 —— 才像"打到底再消散"。
+	var fade := 1.0 - smoothstep(0.65, 1.0, p)
+	var start := c - dir * length * 0.5
+	## 头部的推进用「快出慢收」：匀速读起来像飞行的子弹，减速才像"气劲打出去后散掉"
+	var head_d := length * (1.0 - pow(1.0 - p, 2.0))
+	var head := start + dir * head_d
+	## ⚠️ 气尾**随行进距离拉长**，不能是固定长度：
+	##    固定长度 = 一团小东西从手边飞到远处（像飞镖）；
+	##    越飞越长，才是"一道气被推出去"。
+	var tail_len := clampf(head_d * 0.55, 18.0, float(GameData.ATTACK["qi"]["tail"]))
+	var tail := start + dir * maxf(head_d - tail_len, 0.0)
+	var perp := Vector2(-dir.y, dir.x)
+	## ⭐ M33（用户定案「玉青」）：颜色从 `GameData.ATTACK.qi.color` 来，**只此一处真相**。
+	##    派生三层：外晕 = 原色压暗 / 主体 = 原色 / 芯 = 原色向白提亮。
+	##    ⚠️ 别在下面各写一个颜色字面量 —— 那样调色时得改三处，一定会漏。
+	var base: Color = GameData.ATTACK["qi"]["color"]
+	var q_glow := Color(base.r * 0.85, base.g * 0.95, base.b * 0.92)
+	var q_body := base
+	var q_core := Color(lerpf(base.r, 1.0, 0.80), lerpf(base.g, 1.0, 0.80), lerpf(base.b, 1.0, 0.80))
+	## 从**手心**到气尾拖一道极淡的余痕 —— 少了它，气是"凭空出现在半路"的；
+	## 有了它，玩家能读出「这股气是从我手上出去的」。
+	if head_d > tail_len:
+		draw_line(start, tail, Color(q_glow, 0.10 * fade), 3.0)
+	## 分段画：尾巴淡、头部实 —— 均一 alpha 的线读起来是"射线"，不是"气"
+	## ⚠️ 宽度也要**分段加粗**：等宽的气浪在消失那一刻会"啪"地断掉；
+	##    头粗尾细（0.45 → 1.0）才像一团被推着走的浪头。
+	var segs := 4
+	for i in segs:
+		var f0 := float(i) / float(segs)
+		var f1 := float(i + 1) / float(segs)
+		var a0 := tail + dir * (tail_len * f0)
+		var a1 := tail + dir * (tail_len * f1)
+		var al := (0.16 + 0.66 * f1) * fade
+		var wf := 0.45 + 0.55 * f1                        # 0.45（尾）→ 1.0（头）
+		draw_line(a0, a1, Color(q_glow, al * 0.30), 10.0 * wf)    # 外晕
+		draw_line(a0, a1, Color(q_body, al * 0.75), 4.5 * wf)     # 主体
+		draw_line(a0, a1, Color(q_core, al), 1.4 + 1.0 * f1)      # 芯
+	# 散逸的气丝：尾部两侧各甩出几道短划 —— 气是"被撕开"的，激光不会散
+	for i in 3:
+		var q := tail + dir * (tail_len * (0.20 + 0.28 * float(i)))
+		var off := perp * (4.0 + 2.0 * float(i))
+		draw_line(q + off, q + off + dir * 7.0, Color(q_glow, 0.18 * fade), 1.0)
+		draw_line(q - off, q - off + dir * 6.0, Color(q_glow, 0.14 * fade), 1.0)
+	# 头部亮核：气的前端比尾巴"实"
+	draw_circle(head, 9.0, Color(q_glow, 0.13 * fade))
+	draw_circle(head, 5.0 * (1.0 - 0.4 * p), Color(q_body, 0.50 * fade))
+	draw_circle(head, 2.0 * (1.0 - 0.4 * p), Color(q_core, 0.85 * fade))
+
+
+## ⭐ M33：**前摇的「蓄气」** —— 手心聚起一点灵光，然后气才沿直线打出去。
+##    原来这里是「掌风弧光」（一道月牙扫出去）—— 弧光和「走直线」是两套语言，
+##    留着会让玩家以为攻击是扇形的，所以一起换掉。
+##    ⚠️ 纯表现，不参与判定；`swings` 数组保留（自测盯着它的数量，见 M30.7 用例）。
 func _draw_swings() -> void:
 	if swings.is_empty():
 		return
-	var arc: Dictionary = GameData.ATTACK["arc"]
-	var half := deg_to_rad(float(arc["spread"]) * 0.5)
+	var base: Color = GameData.ATTACK["qi"]["color"]
+	var core := Color(lerpf(base.r, 1.0, 0.80), lerpf(base.g, 1.0, 0.80), lerpf(base.b, 1.0, 0.80))
 	for s in swings:
-		var k := 1.0 - clampf(float(s["t"]) / maxf(float(s["life"]), 0.001), 0.0, 1.0)   # 1 → 0
+		var k := clampf(float(s["t"]) / maxf(float(s["life"]), 0.001), 0.0, 1.0)   # 0 → 1
 		var c: Vector2 = s["center"]
-		var dirv: Vector2 = s["dir"]
-		# 越扫越远、越扫越淡：扇面往外推，才像「扫出去」而不是「贴在手上」
-		var rad := float(arc["radius"]) * (1.0 + (1.0 - k) * 0.35)
-		var a0 := dirv.angle() - half
-		var outer := PackedVector2Array()
-		var inner := PackedVector2Array()
-		for i in range(13):
-			var a := a0 + (2.0 * half) * float(i) / 12.0
-			outer.append(c + Vector2(cos(a), sin(a)) * rad)
-		for i in range(12, -1, -1):
-			var a2 := a0 + (2.0 * half) * float(i) / 12.0
-			inner.append(c + Vector2(cos(a2), sin(a2)) * (rad * 0.62))
-		var band := PackedVector2Array()
-		band.append_array(outer)
-		band.append_array(inner)
-		draw_colored_polygon(band, Color(0.74, 0.92, 0.99, 0.26 * k))
-		draw_polyline(outer, Color(0.88, 0.97, 1.0, 0.72 * k), 2.0)
-		draw_polyline(inner, Color(0.78, 0.93, 1.0, 0.40 * k), 1.5)
+		var r := 1.5 + 6.5 * k                    # 越聚越大
+		var a := 0.30 + 0.70 * k                  # 越聚越亮
+		draw_circle(c, r + 4.0, Color(base, 0.10 * a))
+		draw_circle(c, r, Color(base, 0.34 * a))
+		draw_circle(c, r * 0.42, Color(core, 0.80 * a))
+
+
+## ⭐ M33：**命中冲击** —— 一圈迅速扩大并淡出的环 + 几道放射短线。
+##
+## 为什么是"环"而不是"爆炸"：普攻是一道气打在一点上，反馈应该是**接触面被压出来的一圈**，
+## 而不是从中心炸开的一团 —— 后者是爆炸，前者才是"打到"。
+## ⚠️ 寿命只有 0.18 秒：命中反馈要**短促**，长了会糊住后续动作。
+func _draw_impacts() -> void:
+	if impacts.is_empty():
+		return
+	var base: Color = GameData.ATTACK["qi"]["color"]
+	for im in impacts:
+		var p := clampf(float(im["t"]) / maxf(float(im["life"]), 0.001), 0.0, 1.0)
+		var at: Vector2 = im["pos"]
+		var a := 1.0 - p
+		## 半径先快后慢：冲击是"一下顶出去"，不是匀速胀大
+		var r := 4.0 + 16.0 * (1.0 - pow(1.0 - p, 1.6))
+		draw_arc(at, r, 0.0, TAU, 20, Color(base, 0.55 * a), 1.5)
+		draw_circle(at, 3.5 * (1.0 - p), Color(base, 0.45 * a))
+		for i in 6:
+			var ang := TAU * float(i) / 6.0
+			var d0 := Vector2(cos(ang), sin(ang))
+			draw_line(at + d0 * (r * 0.72), at + d0 * (r + 5.0), Color(base, 0.35 * a), 1.0)
 
 
 # ==================== 自测（M2）====================
@@ -1487,6 +1989,32 @@ func _check_world_composition() -> void:
 			"%.2f%%（%d 格）" % [marsh_pct, marsh])
 
 
+## ⭐⭐ **同心层（ρ）判据**：`ρ = max(|x−c.x|/c.x, |y−c.y|/c.y)`，c = 世界中心。
+##    ⚠️ **必须用 ρ（切比雪夫归一化）不用欧氏距离**：欧氏会让四个角变成事实上的第五层
+##    （角点到中心的欧氏距离 ≈ 半条对角线，比任何一条边的中点都远）⇒ 「环带」语义当场失效。
+##      这是我们定这个判据的**唯一理由**，别为了"更自然"改成欧氏。
+##    ⚠️ **口径：世界坐标（= 格心），不是格索引**。格索引比格心少 16px，换算到 ρ 上差
+##    0.0104 —— 足够把一个点判进错误的层（我们为这个差错过一次）。
+##    ⚠️ 中心与阈值都**由世界尺寸派生**，不写死 1792/1536（改世界尺寸时它跟着走）。
+const RING_MAX := [0.52, 0.71, 0.86]     # L1 / L2 / L3 的上界；L4 = 剩下的一切
+
+
+func _ring_rho(p: Vector2) -> float:
+	var c: Vector2 = GameData.WORLD["size"] * 0.5
+	return maxf(absf(p.x - c.x) / c.x, absf(p.y - c.y) / c.y)
+
+
+func _ring_of(p: Vector2) -> int:
+	var r := _ring_rho(p)
+	if r <= RING_MAX[0]:
+		return 1
+	if r <= RING_MAX[1]:
+		return 2
+	if r <= RING_MAX[2]:
+		return 3
+	return 4
+
+
 func _check(label: String, ok: bool, detail: String = "") -> void:
 	if ok:
 		_pass += 1
@@ -1496,6 +2024,7 @@ func _check(label: String, ok: bool, detail: String = "") -> void:
 	var tail := ""
 	if detail != "":
 		tail = "  —— " + detail
+	_fail_labels.append(label + tail)      # ⭐ M33：失败项留名，收尾时写进结果文件
 	print("[FAIL] ", label, tail)
 
 
@@ -1591,8 +2120,12 @@ func _run_selftest_body() -> void:
 	# ⭐ M25：开局（新局）就是满的 —— 用户要求「开局自动补满灵力」
 	# ⭐ M27：自动存档间隔（用户定案 10 分钟）
 	#    （原来这里还有一条「拍帧间隔 = 60 秒」的断言 —— M28 回溯移除后一并删了）
-	_check("自动存档间隔是 10 分钟（用户定案）",
-			is_equal_approx(float(GameData.ANCHOR["autosave_sec"]), 600.0),
+	# ⭐ M33（用户定案）：**自动存档已关闭** —— 0 是"关"的语义值，不是"每 0 秒"。
+	#    这条断言守的是「有人把它悄悄改回正整数」：那样会恢复定期写盘，
+	#    而写盘会**覆盖玩家的存档**（这正是当时要关掉它的原因）。
+	#    ⚠️ 改回自动存档时，这条断言和 `Hud` 里那段文案要一起改，别只改数据。
+	_check("自动存档已关闭（用户定案；0 = 关）",
+			is_equal_approx(float(GameData.ANCHOR["autosave_sec"]), 0.0),
 			"%.0f 秒" % float(GameData.ANCHOR["autosave_sec"]))
 	_check("新开局灵力是满的", is_equal_approx(player.essence, player.essence_max),
 			"%.0f / %.0f" % [player.essence, player.essence_max])
@@ -1607,14 +2140,20 @@ func _run_selftest_body() -> void:
 	var d: Dummy = dummies[0]
 	var before: float = d.hp
 	var dmg: float = float(GameData.attack_of(player.realm)["damage"])
-	var n: int = spawn_hit(d.position, Vector2.DOWN,
+	var n0: int = spawn_hit(d.position, Vector2.DOWN,
 			float(GameData.ATTACK["length"]), float(GameData.ATTACK["width"]), dmg)
-	_check("伤害区命中 1 个目标", n == 1, "实际命中 %d 个" % n)
+	## ⭐ M33（伤害跟随）：出手那一刻**不该**有伤害 —— 气还没飞到。
+	_check("气刚出手时还没有伤害（伤害跟随：打到才算）",
+			n0 == 0 and is_equal_approx(d.hp, before),
+			"刚出手就命中 %d 个、血量 %.1f" % [n0, d.hp])
+	var n: int = _advance_hits(float(GameData.ATTACK["life"]) + 0.01)
+	_check("气扫过之后命中 1 个目标", n == 1, "实际命中 %d 个" % n)
 	_check("血量严格减少 %.0f" % dmg, is_equal_approx(d.hp, before - dmg),
 			"从 %.1f 变成 %.1f" % [before, d.hp])
 
 	# 4. 打死了就该从名单里划掉
 	spawn_hit(d.position, Vector2.DOWN, 44.0, 36.0, 9999.0)
+	_advance_hits(float(GameData.ATTACK["life"]) + 0.01)
 	_check("血量归零的假人已从名单移除", not dummies.has(d), "dummies 里还有它")
 
 	# 5. 方向性：攻击区中心必须落在玩家朝向的正前方
@@ -1737,7 +2276,6 @@ func _run_selftest_body() -> void:
 	player.position = Vector2(300.0, 300.0)     # 先走开，才好验证「回到出生点」
 	player.take_damage(99999.0)
 	_check("主角血量归零触发死亡流程", deaths == 1, "deaths = %d" % deaths)
-	_on_rewind_chosen(0)                      # M6：死亡会走「时间静止 → 选一枚 → 回溯」
 	_check("死亡后回到出生点并回满血",
 			player.position.is_equal_approx(spawn_point) and is_equal_approx(player.hp, player.hp_max),
 			"位置 %s / 血 %.1f" % [player.position, player.hp])
@@ -1977,7 +2515,7 @@ func _run_selftest_body() -> void:
 	player.toggle_slot(3)                                      # 再套一层盾
 	player.hp = player.hp_max
 	player.take_damage(99999.0)
-	_on_rewind_chosen(0)                      # M6：死亡会走回溯流程
+
 	_check("主角死亡后显化灵印全部收回", player.summoned_count() == 0,
 			"还剩 %d 个" % player.summoned_count())
 	_check("主角死亡后护盾清零", is_zero_approx(player.shield), "盾 = %.1f" % player.shield)
@@ -2036,7 +2574,6 @@ func _run_selftest_body() -> void:
 	player.hp = player.hp_max
 	player.position = Vector2(300.0, 300.0)
 	player.take_damage(99999.0)                     # 死一次
-	_on_rewind_chosen(0)
 
 	_check("死亡后回到回溯帧的位置", player.position.is_equal_approx(spawn_point), "位置 %s" % player.position)
 	_check("死亡后灵力回满", is_equal_approx(player.essence, player.essence_max),
@@ -2060,7 +2597,6 @@ func _run_selftest_body() -> void:
 	take_snapshot()                                # 在「少一个敌人 + 采集点 1 空着」的时刻拍快照
 	player.hp = player.hp_max
 	player.take_damage(99999.0)                    # 再死一次
-	_on_rewind_chosen(0)
 	_check("快照时已死的敌人不会复活", enemies.size() == alive_at_snapshot,
 			"期望 %d 个，实际 %d 个" % [alive_at_snapshot, enemies.size()])
 	_check("快照时已空的采集点保持空", gathers[0].depleted, "被复原了")
@@ -2174,13 +2710,49 @@ func _run_selftest_body() -> void:
 			tbad += str(tp) + "=" + tn + " "
 	_check("地形判定在整个世界范围内都返回合法地形", tbad == "", tbad)
 
-	# 每个区都有采集点 —— 这才是「走出去探索」的意义
-	for key in GameData.ZONES:
-		var zone_count := 0
-		for g in gathers:
-			if is_instance_valid(g) and GameData.zone_at(g.position) == key:
-				zone_count += 1
-		_check("分区「%s」里有 2 处采集点" % key, zone_count == 2, "实际 %d 处" % zone_count)
+	# 每层都有采集点 —— 这才是「走出去探索」的意义。
+	# ⚠️ 旧判据是「四象限 ZONES 每区 2 处」，而采集点已按**同心层**重排（每层 6 个共 24 个），
+	#    且 `GameData.zone_at()` 早就改按**地形**返回（灵田/竹林/…），旧断言拿它跟象限 key 比
+	#    ⇒ 永远比不上（实测报 9/6/4/5，那是地形名的计数）。改成按 ρ 判层，见 `_ring_of()`。
+	var ring_n := [0, 0, 0, 0]
+	for g in gathers:
+		if is_instance_valid(g):
+			ring_n[_ring_of(g.position) - 1] += 1
+	for li in range(4):
+		_check("同心层 L%d 里至少有 2 处采集点" % (li + 1), ring_n[li] >= 2,
+				"实际 %d 处（四层实测：%s）" % [ring_n[li], str(ring_n)])
+	## ⭐ 数据表里每处采集点自带 `ring` 字段：**派生的层必须与声明的层一致**。
+	##    只测「每层有几个点」测不出这个 —— 一个点被挪了而 ring 没改，计数照样是 6/6/6/6。
+	var ring_mis := ""
+	for spot: Dictionary in GameData.GATHER["spots"]:
+		var sp: Vector2 = spot["pos"]
+		if _ring_of(sp) != int(spot["ring"]):
+			ring_mis += "%s(声明L%d≠实测L%d) " % [str(spot["id"]), int(spot["ring"]), _ring_of(sp)]
+	_check("采集点声明的层号与 ρ 实测一致（守「点被挪了 ring 没改」）",
+			ring_mis == "", ring_mis)
+	## ⭐ 边界反例：ρ 是**分段常数**，阈值两侧 ±0.01 必须翻层。只测计数测不出分界写错 ——
+	##    层界写反、`<=` 写成 `<`，计数照样可能是 6/6/6/6。
+	var ring_bad := ""
+	var c0: Vector2 = GameData.WORLD["size"] * 0.5
+	for ti in range(RING_MAX.size()):
+		var tv: float = RING_MAX[ti]
+		var lo := Vector2(c0.x + (tv - 0.01) * c0.x, c0.y)
+		var hi := Vector2(c0.x + (tv + 0.01) * c0.x, c0.y)
+		if _ring_of(lo) != ti + 1 or _ring_of(hi) != ti + 2:
+			ring_bad += "界%.2f: %.3f→L%d %.3f→L%d " % [tv, tv - 0.01, _ring_of(lo), tv + 0.01, _ring_of(hi)]
+	_check("ρ 阈值边界 ±0.01 必须翻层（守「层界写反 / <= 写成 <」）",
+			ring_bad == "", ring_bad)
+	## ⭐ 真实数据里离阈值最近的点是这条判据最脆的地方，无条件打印（红了才看得见的数字没用）。
+	var ring_near := ""
+	for sn: Dictionary in GameData.GATHER["spots"]:
+		var spn: Vector2 = sn["pos"]
+		var rn := _ring_rho(spn)
+		for tv2 in RING_MAX:
+			if absf(rn - tv2) < 0.02:
+				ring_near += "%s(ρ=%.4f, 距%.2f %+.4f → L%d) " % [
+						str(sn["id"]), rn, tv2, rn - tv2, _ring_of(spn)]
+	print("[同心层] 四层实测：%s；阈值 ±0.02 内的点：%s"
+			% [str(ring_n), ring_near if ring_near != "" else "无"])
 
 	# 主角被钳在世界里
 	player.position = Vector2(-500.0, -500.0)
@@ -2217,7 +2789,11 @@ func _run_selftest_body() -> void:
 	pickups.clear()
 	player.position = spawn_point
 
-	_check("材料表有 8 种", GameData.MATERIALS.size() == 8, "实际 %d 种" % GameData.MATERIALS.size())
+	## ⚠️ 只设**下限**，不钉死具体数字：这条要守的是「材料被悄悄删掉」，不是「恰好 N 种」。
+	##    数据层补顶层触媒时这里红过一次（`== 8` 而实际 10）—— 那是断言在惩罚**正常加内容**。
+	_check("材料表至少 %d 种（守「材料被悄悄删掉」；新增材料不该红）" % MATERIAL_MIN,
+			GameData.MATERIALS.size() >= MATERIAL_MIN,
+			"实际 %d 种（%s）" % [GameData.MATERIALS.size(), str(GameData.MATERIALS.keys())])
 	_check("背包一开始是空的", player.bag.capacity_used() == 0 and player.bag.stones == 0,
 			"占用 %d，灵石 %d" % [player.bag.capacity_used(), player.bag.stones])
 
@@ -2468,7 +3044,6 @@ func _run_selftest_body() -> void:
 	var bag_at_anchor: int = (snapshot.get("bag", {}) as Dictionary).size()
 	player.hp = player.hp_max
 	player.take_damage(99999.0)
-	_on_rewind_chosen(0)
 	_check("回溯把地上的掉落物一并抹掉", pickups.is_empty(), "还剩 %d 件" % pickups.size())
 	# ⚠️ M12 改写了这条：用户要求「连境界一起倒流」（严格照 §4.3），
 	#    所以灵石与材料也退回锚点值 —— 不再是「地上的没了、背包里的还在」。
@@ -2890,7 +3465,6 @@ func _run_selftest_body() -> void:
 	take_snapshot()
 	player.hp = player.hp_max
 	player.take_damage(99999.0)
-	_on_rewind_chosen(0)
 	var elites_after := 0
 	for e in enemies:
 		if is_instance_valid(e) and e.elite:
@@ -2964,7 +3538,6 @@ func _run_selftest_body() -> void:
 	player.hp = player.hp_max
 	player.position = Vector2(300.0, 300.0)
 	player.take_damage(99999.0)
-	_on_rewind_chosen(0)
 	# ⚠️ M28：原来断言「死亡后退到时间线那一帧的位置」—— 回溯移除后统一回出生点。
 	_check("死亡后回到出生点（不再有「退到某一帧」这回事）", player.position.is_equal_approx(spawn_point),
 			str(player.position))
@@ -2978,7 +3551,6 @@ func _run_selftest_body() -> void:
 	player.refresh_limits()
 	player.hp = player.hp_max
 	player.take_damage(99999.0)
-	_on_rewind_chosen(0)
 	_check("境界随回溯倒流（4 → 3）", player.realm == 3, "境界 %d" % player.realm)
 	_check("上限跟着退回锚点时的值（金丹基础 + 当时的小境界 + 炼化满的基础加成）",
 			is_equal_approx(player.hp_max, 180.0 + player.sub_bonus("hp") + player.base_bonus_add("hp_max")),
@@ -3167,7 +3739,6 @@ func _run_selftest_body() -> void:
 	player.seal_rank["灰烬印"] = 9
 	player.hp = player.hp_max
 	player.take_damage(99999.0)
-	_on_rewind_chosen(0)
 	_check("灵印等级随回溯退回那一帧的值", player.rank_of("灰烬印") == rank_snap,
 			"实际 %d，期望 %d" % [player.rank_of("灰烬印"), rank_snap])
 	var saved3: Dictionary = SaveGameScript.to_dict(self)
@@ -3441,7 +4012,6 @@ func _run_selftest_body() -> void:
 	merchant.stock["雷髓"] = 0
 	player.hp = player.hp_max
 	player.take_damage(99999.0)
-	_on_rewind_chosen(0)
 	_check("货架随回溯退回那一帧的状态", merchant.available("雷髓") == stock_snap,
 			"%d，期望 %d" % [merchant.available("雷髓"), stock_snap])
 	var saved5: Dictionary = SaveGameScript.to_dict(self)
@@ -3479,7 +4049,7 @@ func _run_selftest_body() -> void:
 			"%.0f → %.0f（灵力 %.0f）" % [m25_low, player.essence_max, player.essence])
 	player.realm = 1
 	player.refill()
-	_check("存档版本号是 8（+ 世界容器改尺寸）", int(SaveGameScript.VERSION) == 8,
+	_check("存档版本号是 9（+ 多区域：region / anchor_global）", int(SaveGameScript.VERSION) == 9,
 			"%d" % int(SaveGameScript.VERSION))
 
 	# ⭐ 接线：E 必须真的走到 try_interact（否则「E 交易 / E 突破」的提示是空话）
@@ -3626,7 +4196,6 @@ func _run_selftest_body() -> void:
 	player.cultivation = 90.0
 	player.hp = player.hp_max
 	player.take_damage(99999.0)
-	_on_rewind_chosen(0)
 	_check("修为随回溯退回那一帧的值", is_equal_approx(player.cultivation, 40.0),
 			"实际 %.0f" % player.cultivation)
 	var saved6: Dictionary = SaveGameScript.to_dict(self)
@@ -3687,7 +4256,6 @@ func _run_selftest_body() -> void:
 	var realm_after_bt: int = player.realm
 	player.hp = player.hp_max
 	player.take_damage(99999.0)
-	_on_rewind_chosen(0)
 	_check("突破完就死：境界**退回**回溯点的值（突破不钉锚）",
 			player.realm == snap_realm_at_death,
 			"突破到 %d，死了回到 %d（期望 %d）" % [realm_after_bt, player.realm, snap_realm_at_death])
@@ -3706,7 +4274,6 @@ func _run_selftest_body() -> void:
 	_check("钉锚之后就不再是未钉锚", not unbanked_realm(), "钉锚没生效")
 	player.hp = player.hp_max
 	player.take_damage(99999.0)
-	_on_rewind_chosen(0)
 	_check("钉锚之后再死：突破保住了", player.realm == 2, "境界 %d" % player.realm)
 	spawn_point = keep_spawn
 	player.realm = 1
@@ -3853,12 +4420,16 @@ func _run_selftest_body() -> void:
 	# 7. 旧档迁移链：v4 →（减半）→（×4）→（v8 改尺寸按比例）→ 世界中心
 	#    ⭐ 迁移是**链式**的：每一条只管自己那一段，所以 v4 档要把 v5/v7/v8 三段全走一遍。
 	var v4_save: Dictionary = SaveGameScript.to_dict(self)
+	v4_save.erase("anchor_global")          # v8 档没有这个字段
+	v4_save.erase("region")
 	v4_save["version"] = 4
 	v4_save["anchor"] = [1280.0, 720.0]        # 旧世界的正中心
 	SaveGameScript.from_dict(self, v4_save)
 	_check("读 v4 旧档：减半 → ×4 → 按 v8 比例缩放（1280,720 → 世界中心 %s）" % str(GameData.WORLD["size"] * 0.5),
 			spawn_point.is_equal_approx(GameData.WORLD["size"] * 0.5), str(spawn_point))
 	var v5_save: Dictionary = SaveGameScript.to_dict(self)
+	v5_save.erase("anchor_global")
+	v5_save.erase("region")
 	v5_save["version"] = 5
 	v5_save["anchor"] = [1280.0, 720.0]        # v5 世界（减半后）的坐标
 	SaveGameScript.from_dict(self, v5_save)
@@ -3866,6 +4437,8 @@ func _run_selftest_body() -> void:
 			spawn_point.is_equal_approx(Vector2(3584.0, 3072.0)), str(spawn_point))
 	# 8. 旧档迁移（M31 Step 0）：v7 的坐标是**旧世界** 5120×2880 的，读进来必须按比例缩放
 	var v7_save: Dictionary = SaveGameScript.to_dict(self)
+	v7_save.erase("anchor_global")
+	v7_save.erase("region")
 	v7_save["version"] = 7
 	v7_save["anchor"] = [2560.0, 1440.0]        # 旧世界的正中心
 	SaveGameScript.from_dict(self, v7_save)
@@ -3876,12 +4449,16 @@ func _run_selftest_body() -> void:
 			and is_equal_approx(SaveGameScript.WORLD_SIZE_V7.y * (3072.0 / 2880.0), GameData.WORLD["size"].y),
 			"%s → %s" % [str(SaveGameScript.WORLD_SIZE_V7), str(GameData.WORLD["size"])])
 	var v8_save: Dictionary = SaveGameScript.to_dict(self)
+	v8_save.erase("anchor_global")
+	v8_save.erase("region")
 	v8_save["anchor"] = [1000.0, 500.0]        # 已经是新世界的坐标
 	SaveGameScript.from_dict(self, v8_save)
 	_check("读 v8 新档：坐标原样读回（不做迁移）",
 			spawn_point.is_equal_approx(Vector2(1000.0, 500.0)), str(spawn_point))
 	# 9. 兜底：手改坏的存档也不能把主角丢到图外
 	var v8_out: Dictionary = SaveGameScript.to_dict(self)
+	v8_out.erase("anchor_global")
+	v8_out.erase("region")
 	v8_out["anchor"] = [99999.0, -500.0]
 	SaveGameScript.from_dict(self, v8_out)
 	#    ⚠️ 分轴夹取：x 夹到右边界、y 夹到上边界 —— 不是整体夹到同一个角
@@ -4080,6 +4657,11 @@ func _run_selftest_body() -> void:
 			item_no_art.append("%s（没掉落图）" % itn)
 		elif dt5.get_width() != 8 or dt5.get_height() != 8:
 			item_no_art.append("%s（掉落 %dx%d）" % [itn, dt5.get_width(), dt5.get_height()])
+	## ⚠️ 无条件打印（红了才看得见的数字没用）。这条当前**已知在红**，原因是数据层新增的
+	##    两个顶层触媒还没有专属美术，而用户刚拍了「先不做美术」—— 等 team-lead 问回结论。
+	##    隔离结论：失败的只有「没短名」这一类，**没有任何老材料出现「没图标 / 没掉落图 /
+	##    尺寸不对」**，所以它是纯新增项欠图，不是回归。
+	print("[美术覆盖] 缺图标/掉落图的物品：%d 个 %s" % [item_no_art.size(), str(item_no_art)])
 	_check("每种材料 + 灵石都有图标(32×32)与掉落图(8×8)", item_no_art.is_empty(), str(item_no_art))
 	_check("灵印没有掉落图（有意的例外：地上的印要能认出是哪一枚，只能走形状语言）",
 			GameData.item_drop_visual("流风印").is_empty(), str(GameData.item_drop_visual("流风印")))
@@ -4487,6 +5069,9 @@ func _run_selftest_body() -> void:
 	player._attack_input(0.016)
 	Input.action_release("attack")
 	player._attack_input(float(GameData.ATTACK["windup"]) + 0.001)
+	## ⭐ M33（伤害跟随）：气要飞到敌人身上才掉血 —— 这里必须把时间推过去，
+	##    否则断言测的就不是"真实玩法"而是"抬手就算伤害"的旧行为。
+	_advance_hits(float(GameData.ATTACK["life"]) + 0.01)
 	_check("命中：伤害 = 境界表 + 炼化的基础加成（不写死数字）",
 			is_equal_approx(m30_hp0 - m30_foe.hp,
 					float(GameData.attack_of(player.realm)["damage"]) + player.attack_damage_bonus()),
@@ -4498,8 +5083,10 @@ func _run_selftest_body() -> void:
 			"推了 %.1f" % (m30_foe.position.x - m30_x0))
 
 	# ---- 空挥：判定命中 0 个（未命中就没有任何命中反馈）----
-	_check("空挥命中 0 个目标（未命中不产生任何反馈）",
-			spawn_hit(Vector2(9999.0, 9999.0), Vector2.RIGHT, 44.0, 36.0, 8.0) == 0, "竟然打到了")
+	spawn_hit(Vector2(9999.0, 9999.0), Vector2.RIGHT, 44.0, 36.0, 8.0)
+	var n_miss: int = _advance_hits(float(GameData.ATTACK["life"]) + 0.01)
+	_check("空挥命中 0 个目标（未命中不产生任何反馈）", n_miss == 0,
+			"竟然打到了 %d 个" % n_miss)
 
 	# ---- 后摇可取消：冷却中照样能走（边打边跑）----
 	player.position = spawn_point
@@ -4605,6 +5192,88 @@ func _run_selftest_body() -> void:
 	_check("同一格内自由移动（不会被自己的格子挡住）",
 			GameData.can_step(Vector2(100.0, 100.0), Vector2(104.0, 103.0)), "同格微动")
 
+	# ---- M34 朝向扇区：死区 / 跳格 / 映射 ----
+	## ⭐ 守的是「鼠标压在扇区边界上不抽帧」：扇区是有记忆的状态，不是每帧现算。
+	var p_sec = player
+	var sec_bak: int = p_sec._dir_sector
+	p_sec._dir_sector = 2                                    # 朝下（中心 = 90°）
+	p_sec._update_dir_sector(Vector2.DOWN.angle() + 0.30)    # 偏 17°，还在死区里
+	_check("朝向扇区：边界附近**不换**图（死区生效，鼠标抖不抽帧）", p_sec._dir_sector == 2,
+			"偏 17° 仍留在扇区 2")
+	p_sec._update_dir_sector(Vector2.RIGHT.angle())          # 偏 90°，越界
+	_check("朝向扇区：越界**一次跳到最近**（不按格步进）", p_sec._dir_sector == 0,
+			"正右 → 扇区 0")
+	_check("朝向扇区：正右映射到 walk_r", p_sec._walk_anim_name(GameData.PLAYER) == "walk_r",
+			p_sec._walk_anim_name(GameData.PLAYER))
+	p_sec._dir_sector = 2
+	_check("朝向扇区：朝下映射到 walk_d", p_sec._walk_anim_name(GameData.PLAYER) == "walk_d",
+			p_sec._walk_anim_name(GameData.PLAYER))
+	p_sec._dir_sector = sec_bak
+	## ⭐ 站定转身是**缓的**：一帧只走一小段，不会瞬间翻面（也不能过冲）。
+	##    ⚠️ 目标用 90° 而不是 180°：正对面时 `lerp_angle` 走的是**最短路**（会转成负角），
+	##    那是正确行为，但拿它验「转了多少度」会把自己绕进去。
+	var turned := lerp_angle(0.0, PI * 0.5, 1.0 - exp(-p_sec.TURN_RATE * 0.016))
+	_check("朝向平滑：一帧只转一小段（不是瞬间翻面）", turned > 0.0 and turned < PI * 0.5,
+			"一帧 %.1f° / 目标 90°" % rad_to_deg(turned))
+
+	# ---- M34 多区域骨架：区域表 / 坐标换算 / 存档 / 换区 ----
+	_check("区域表：cangwu 在原点、east_march 紧贴它东侧（两块不重叠）",
+			GameData.region_origin("cangwu") == Vector2.ZERO
+			and GameData.region_origin("east_march") == Vector2(GameData.region_size("cangwu").x, 0.0),
+			"east_march origin=%s cangwu size=%s" % [
+				str(GameData.region_origin("east_march")), str(GameData.region_size("cangwu"))])
+	_check("区域表：邻接是**双向**的（单向会走得过去、回不来）",
+			str(GameData.neighbors_of("cangwu").get("east", "")) == "east_march"
+			and str(GameData.neighbors_of("east_march").get("west", "")) == "cangwu",
+			"cangwu.east=%s / east_march.west=%s" % [
+				str(GameData.neighbors_of("cangwu").get("east", "")),
+				str(GameData.neighbors_of("east_march").get("west", ""))])
+	var l9 := Vector2(123.0, 456.0)
+	var rt9: Vector2 = GameData.global_to_local("east_march",
+			GameData.local_to_global("east_march", l9))
+	_check("区域坐标：局部 → 全局 → 局部 往返无损（换区不把人挪偏）",
+			rt9.is_equal_approx(l9), "%s → %s" % [str(l9), str(rt9)])
+
+	## 存档 v9：v8 旧档（没有 region / anchor_global）读进来必须落在 cangwu、坐标不变
+	var reg_bak: String = current_region
+	var sp_bak: Vector2 = spawn_point
+	var v8: Dictionary = SaveGameScript.to_dict(self)
+	v8["version"] = 8
+	v8.erase("region")
+	v8.erase("anchor_global")
+	v8["anchor"] = [777.0, 888.0]
+	var ok8: bool = SaveGameScript.from_dict(self, v8)
+	_check("存档 v9：v8 旧档落在 cangwu、锚点坐标原样（不糊一层迁移）",
+			ok8 and current_region == "cangwu" and spawn_point.is_equal_approx(Vector2(777.0, 888.0)),
+			"ok=%s region=%s anchor=%s" % [str(ok8), str(current_region), str(spawn_point)])
+	GameData.set_region("cangwu")
+	current_region = "cangwu"
+	spawn_point = Vector2(321.0, 654.0)
+	var v9: Dictionary = SaveGameScript.to_dict(self)
+	var ok9: bool = SaveGameScript.from_dict(self, v9)
+	_check("存档 v9：region 与锚点往返一致（全局坐标换算不丢精度）",
+			ok9 and current_region == "cangwu" and spawn_point.is_equal_approx(Vector2(321.0, 654.0)),
+			"ok=%s region=%s anchor=%s" % [str(ok9), str(current_region), str(spawn_point)])
+	current_region = reg_bak
+	spawn_point = sp_bak
+	GameData.set_region(reg_bak)
+
+	## 换区：区域 / 相机边界 / 内容可见性必须一起动
+	var e0: Node2D = enemies[0] as Node2D if enemies.size() > 0 else null
+	_apply_travel("east_march", Vector2(40.0, 40.0))
+	_check("换区：区域与相机边界一起换（边界用的是新区域的尺寸）",
+			current_region == "east_march"
+			and camera.limit_right == int(GameData.region_size("east_march").x)
+			and player.position.is_equal_approx(Vector2(40.0, 40.0)),
+			"region=%s limit_r=%d pos=%s" % [current_region, camera.limit_right, str(player.position)])
+	_check("换区：旧区内容整体隐身（骨架区还没有自己的内容表）",
+			e0 != null and not e0.visible, "enemies=%d" % enemies.size())
+	_apply_travel("cangwu", sp_bak)
+	_check("换区：回到本体后内容恢复可见", e0 != null and e0.visible, "")
+	_check("换区：回到本体后 GameData 的 WORLD_* 跟着回来（不留上个区的残值）",
+			GameData.current_region == "cangwu" and GameData.WORLD_COLS == 112,
+			"region=%s cols=%d" % [GameData.current_region, GameData.WORLD_COLS])
+
 	_st_done = true                  # ⭐ 只有全程没抛异常才会走到这（假绿灯的判据）
 
 
@@ -4623,4 +5292,17 @@ func _selftest_finish() -> void:
 	_check("断言总数不低于基线 %d（只能涨不能跌；删断言必红）" % SELFTEST_MIN,
 			total >= SELFTEST_MIN, "实际 %d 项" % total)
 	print("通过 %d 项，失败 %d 项" % [_pass, _fail])
+	## ⭐ M33：**结果落盘**。为什么需要：控制台的日志缓冲区只有 200 行，而断言有 580+ 条 ——
+	##    "开头两百条全绿"完全可能掩盖末尾的红。写一份结果文件，让"有没有全过"变成
+	##    可以 grep 的事实，而不是靠"我记得刚才没看到红的"。
+	##    ⚠️ 写在 `.godot/` 里：它被 gitignore，不会污染仓库，也不会被当成存档。
+	##    ⚠️ 这不是"自测写盘"——那条规矩守的是**玩家存档**，这里写的是测试报告。
+	var rep := FileAccess.open("res://.godot/selftest_result.txt", FileAccess.WRITE)
+	if rep != null:
+		rep.store_string("pass=%d fail=%d total=%d done=%s\n" % [_pass, _fail, total, str(_st_done)])
+		if _fail > 0:
+			rep.store_string("FAILED\n")
+			for lbl in _fail_labels:
+				rep.store_string("  - %s\n" % str(lbl))
+		rep.close()
 	get_tree().quit(1 if _fail > 0 else 0)

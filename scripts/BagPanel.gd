@@ -332,7 +332,15 @@ func _draw_list() -> void:
 				ActorVisual.draw_icon(self, stex, rr.position + Vector2(28.0, 18.0))
 			else:
 				_draw_diamond(rr.position + Vector2(26.0, 18.0), 9.0, d["color"])
-			_text("%s（灵印）" % name_key, rr.position + Vector2(46.0, 24.0), Color(0.88, 0.82, 0.76), 15)
+			# ⭐ 被封印的印：条目名**灰化**，名字右侧跟一小行「封印 · 金丹」
+			#    （和命窍面板同一套说法 —— 两个面板都问 Player.seal_gate_text()）。
+			var gate_txt := str(player.seal_gate_text(name_key))
+			var nm := "%s（灵印）" % name_key
+			_text(nm, rr.position + Vector2(46.0, 24.0),
+					Color(0.88, 0.82, 0.76) if gate_txt == "" else Color(0.56, 0.54, 0.58), 15)
+			if gate_txt != "":
+				_text(gate_txt, rr.position + Vector2(54.0 + _text_width(nm, 15), 24.0),
+						Color(0.94, 0.70, 0.62), 11)
 			_text("炼化 %d%%" % int(player.refine_of(name_key)),
 					rr.position + Vector2(rr.size.x - 130.0, 24.0), Color(0.62, 0.66, 0.72), 13)
 		else:
@@ -372,6 +380,12 @@ func _draw_detail() -> void:
 		_text("灵印 · %s · 炼化 %d%%" % [GameData.RANKS[int(sd["rank"])], int(player.refine_of(str(e["name"])))],
 				Vector2(x, y), Color(0.80, 0.78, 0.72), 14)
 		y += 26.0
+		# ⭐ 封印说清楚「要等到哪一重」—— 只写「现在用不了」等于让玩家自己猜还差多远
+		var gate: String = player.seal_gate_text(str(e["name"]))
+		if gate != "":
+			_text("%s —— 这枚印现在动不了，得等到那一重境界" % gate,
+					Vector2(x, y), Color(0.94, 0.70, 0.62), 13)
+			y += 22.0
 		_text("炼化去 Tab 命窍面板（花灵力，不再吃材料）；换上活跃槽也在那里。",
 				Vector2(x, y), Color(0.66, 0.70, 0.76), 13)
 		y += 22.0
@@ -426,6 +440,13 @@ func _draw_buttons(has_sel: bool) -> void:
 		var d2 := detail_rect()
 		_text(use_reason, Vector2(d2.position.x + 22.0, d2.position.y + d2.size.y - 22.0),
 				Color(0.70, 0.62, 0.52), 12)
+
+
+## 一行字有多宽 —— 用来把「封印 · 金丹」摆在条目名**右边**（不写死偏移量）。
+func _text_width(s: String, px: int) -> float:
+	if _font == null:
+		return float(s.length()) * float(px) * 0.6      # 没字体时的兜底估算
+	return _font.get_string_size(s, HORIZONTAL_ALIGNMENT_LEFT, -1, px).x
 
 
 func _draw_diamond(at: Vector2, s: float, col: Color) -> void:

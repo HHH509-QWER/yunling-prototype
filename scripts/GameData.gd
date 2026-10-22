@@ -17,45 +17,39 @@ const PLAYER := {
 	"essence_max": 100.0,
 	## ⭐ 外观（像素美术）：文件不在就自动回退成色块，见 ActorVisual.gd
 	"visual": {
-		## ⭐⭐ M30.14：主角换成 **HD 立绘**（动画风管线）。
-		##    ⚠️ 世界尺度**一点没变**：192px 的图 × scale 0.25 = **48 世界单位**，和旧像素贴图同样大。
-		"texture": "res://art/units_hd/hd_player_idle1.png",
+		## ⭐⭐ M33：主角改用**原生像素画的四方向立绘**（前 / 后 / 左 + 左镜像成右）。
+		##    素材由 `art/tools/build_player_4dir.gd` 从三张单方向图生成：
+		##    抠白底 → 只留最大连通块（去掉水印那种孤立像素）→ 三者用**同一个缩放系数**
+		##    → 脚底压到同一行。少任何一步，走路时就会"一大一小"或"上下跳"。
+		##    ⚠️ 画布仍是 192×192、scale 仍 0.25 ⇒ **世界高 48、玩法与自测都不动**；
+		##       差别是人物只占 48px、被最近邻放大 4 倍塞进画布 —— 显示出来是硬边像素，
+		##       而不是"1900px 压到 192"那种糊。
+		"texture": "res://art/units_hd/p4_d.png",
 		"scale": 0.25,
-		## ⭐ 动作表：一个动作 = 一组帧 + 速率 + 是否循环。加动作 = 加一行。
-		##    播放由 Player 的 _anim 状态机管 —— 触发点在按键 / 施法那几处，不在 _draw 里。
 		"anims": {
-			## ⚠️ M30.14：暂时**每个动作只有 1 帧 HD 图**（先定风格）。
-			##    剩下 15 帧出齐后，这里换成多帧列表即可 —— 动作表结构没变。
-			## ⭐ M30.16：走路接上 **4 帧序列图**（用户出图 → 我按 4 格切）—— 不再是滑行的一张图。
-			##    fps 9：8 帧/秒偏慢、12 偏赶，9 正好是"一步步走"的节奏。
-			"walk": {"frames": ["res://art/units_hd/hd_player_walk1.png", "res://art/units_hd/hd_player_walk2.png", "res://art/units_hd/hd_player_walk3.png", "res://art/units_hd/hd_player_walk4.png"], "fps": 9.0, "loop": true},
-			## ⭐⭐ M30.19：**8 方向**（用户从 360° 转盘导出 → 统一缩放/基准线切成 79×192）
-			##    d=朝下 dl=左下 dr=右下 l=左 r=右 u=朝上 ul=左上 ur=右上。
-			##    每向目前 1 帧（站姿与行走共用）；走路多帧等序列图再补。
-			## ⭐ M30.20：6 帧真走路（用户出 8 方向 × 6 格序列图 → 统一缩放切成 68×192）
-			"walk_d": {"frames": ["res://art/units_hd/hd_player_d1.png", "res://art/units_hd/hd_player_d2.png", "res://art/units_hd/hd_player_d3.png", "res://art/units_hd/hd_player_d4.png", "res://art/units_hd/hd_player_d5.png", "res://art/units_hd/hd_player_d6.png"], "fps": 10.0, "loop": true},
-			## ⭐ M30.20：6 帧真走路（用户出 8 方向 × 6 格序列图 → 统一缩放切成 68×192）
-			"walk_dl": {"frames": ["res://art/units_hd/hd_player_dl1.png", "res://art/units_hd/hd_player_dl2.png", "res://art/units_hd/hd_player_dl3.png", "res://art/units_hd/hd_player_dl4.png", "res://art/units_hd/hd_player_dl5.png", "res://art/units_hd/hd_player_dl6.png"], "fps": 10.0, "loop": true},
-			## ⭐ M30.20：6 帧真走路（用户出 8 方向 × 6 格序列图 → 统一缩放切成 68×192）
-			"walk_dr": {"frames": ["res://art/units_hd/hd_player_dr1.png", "res://art/units_hd/hd_player_dr2.png", "res://art/units_hd/hd_player_dr3.png", "res://art/units_hd/hd_player_dr4.png", "res://art/units_hd/hd_player_dr5.png", "res://art/units_hd/hd_player_dr6.png"], "fps": 10.0, "loop": true},
-			## ⭐ M30.20：6 帧真走路（用户出 8 方向 × 6 格序列图 → 统一缩放切成 68×192）
-			"walk_l": {"frames": ["res://art/units_hd/hd_player_l1.png", "res://art/units_hd/hd_player_l2.png", "res://art/units_hd/hd_player_l3.png", "res://art/units_hd/hd_player_l4.png", "res://art/units_hd/hd_player_l5.png", "res://art/units_hd/hd_player_l6.png"], "fps": 10.0, "loop": true},
-			## ⭐ M30.20：6 帧真走路（用户出 8 方向 × 6 格序列图 → 统一缩放切成 68×192）
-			"walk_r": {"frames": ["res://art/units_hd/hd_player_r1.png", "res://art/units_hd/hd_player_r2.png", "res://art/units_hd/hd_player_r3.png", "res://art/units_hd/hd_player_r4.png", "res://art/units_hd/hd_player_r5.png", "res://art/units_hd/hd_player_r6.png"], "fps": 10.0, "loop": true},
-			## ⭐ M30.20：6 帧真走路（用户出 8 方向 × 6 格序列图 → 统一缩放切成 68×192）
-			"walk_u": {"frames": ["res://art/units_hd/hd_player_u1.png", "res://art/units_hd/hd_player_u2.png", "res://art/units_hd/hd_player_u3.png", "res://art/units_hd/hd_player_u4.png", "res://art/units_hd/hd_player_u5.png", "res://art/units_hd/hd_player_u6.png"], "fps": 10.0, "loop": true},
-			## ⭐ M30.20：6 帧真走路（用户出 8 方向 × 6 格序列图 → 统一缩放切成 68×192）
-			"walk_ul": {"frames": ["res://art/units_hd/hd_player_ul1.png", "res://art/units_hd/hd_player_ul2.png", "res://art/units_hd/hd_player_ul3.png", "res://art/units_hd/hd_player_ul4.png", "res://art/units_hd/hd_player_ul5.png", "res://art/units_hd/hd_player_ul6.png"], "fps": 10.0, "loop": true},
-			## ⭐ M30.20：6 帧真走路（用户出 8 方向 × 6 格序列图 → 统一缩放切成 68×192）
-			"walk_ur": {"frames": ["res://art/units_hd/hd_player_ur1.png", "res://art/units_hd/hd_player_ur2.png", "res://art/units_hd/hd_player_ur3.png", "res://art/units_hd/hd_player_ur4.png", "res://art/units_hd/hd_player_ur5.png", "res://art/units_hd/hd_player_ur6.png"], "fps": 10.0, "loop": true},
-			"cast": {"frames": ["res://art/units_hd/hd_player_cast1.png"], "fps": 10.0, "loop": false},
-			"combo": {"frames": ["res://art/units_hd/hd_player_cast1.png"], "fps": 11.0, "loop": false},
-			"attack": {"frames": ["res://art/units_hd/hd_player_stand.png"], "fps": 16.0, "loop": false},
+			## ⚠️ M33（用户定案）：**游戏改成四方向**。
+			##    八个 `walk_*` 键全部保留 —— `Player._walk_anim_name()` 仍按 8 向选名字，
+			##    缺键会回退到无后缀的 `walk`；所以**斜向必须显式指向左右**，否则斜着走会
+			##    退回旧 HD 图，风格瞬间跳走。这是四方向游戏的通行做法。
+			"walk": {"frames": ["res://art/units_hd/p4_d.png"], "fps": 10.0, "loop": true},
+			"walk_d": {"frames": ["res://art/units_hd/p4_d.png"], "fps": 10.0, "loop": true},
+			"walk_u": {"frames": ["res://art/units_hd/p4_u.png"], "fps": 10.0, "loop": true},
+			"walk_l": {"frames": ["res://art/units_hd/p4_l.png"], "fps": 10.0, "loop": true},
+			"walk_r": {"frames": ["res://art/units_hd/p4_r.png"], "fps": 10.0, "loop": true},
+			"walk_dl": {"frames": ["res://art/units_hd/p4_l.png"], "fps": 10.0, "loop": true},
+			"walk_ul": {"frames": ["res://art/units_hd/p4_l.png"], "fps": 10.0, "loop": true},
+			"walk_dr": {"frames": ["res://art/units_hd/p4_r.png"], "fps": 10.0, "loop": true},
+			"walk_ur": {"frames": ["res://art/units_hd/p4_r.png"], "fps": 10.0, "loop": true},
+			## 施法 / 结印暂时也用正面图：旧 HD 图会瞬间跳回另一种画风，比"没动作"更刺眼。
+			"cast": {"frames": ["res://art/units_hd/p4_d.png"], "fps": 10.0, "loop": false},
+			"combo": {"frames": ["res://art/units_hd/p4_d.png"], "fps": 11.0, "loop": false},
+			"attack": {"frames": ["res://art/units_hd/p4_d.png"], "fps": 16.0, "loop": false},
 		},
-		## ⭐ M30.14：HD 立绘 192 高 × scale 0.25 = 48 世界单位（和旧贴图一样大）。
-		## 脚底行 183 → 世界坐标 183×0.25 = 45.75 → offset.y = -(48/2 - 45.75) ≈ **-22**。
-		## 自测会**真的去读 PNG 找脚底行**，算出来对不对 —— 换图换错它会红。
-		"offset": Vector2(0.0, -22.0),
+		## ⭐ M30.14：192 高 × scale 0.25 = 48 世界单位（和旧像素贴图一样大）。
+		## 自测会**真的去读 PNG 找脚底行**，反算脚有没有踩在碰撞圆心上 —— 换图换错它会红。
+		## ⚠️ M33：四方向这张素材的脚底在**最后一行 191**（旧 HD 图有 9px 下边距、在 183），
+		##    所以 offset.y = -((191+1) - 192/2) × 0.25 = **-24**（旧图是 -22）。
+		"offset": Vector2(0.0, -24.0),
 	},
 }
 
@@ -63,17 +57,25 @@ const PLAYER := {
 # M1 的做法：每次出手，在玩家正前方生成一个「短命伤害区」。
 # 它只活 life 秒，寿命到了就消失 —— 不是持续伤害。
 const ATTACK := {
-	"reach": 23.0,           # 攻击区中心离玩家多远
-	"length": 44.0,          # 攻击区长度（沿朝向）
-	"width": 36.0,           # 攻击区宽度（垂直朝向）
-	"life": 0.12,            # 攻击区活多久（秒）
+	## ⭐⭐ M33（用户定案）：「普攻是一道气打出去，**一条直线**」，不要那个方框。
+	##    ⇒ 参数从「一小块方区」改成**长而窄的一条线**：起点在身前 20、终点在身前 196，
+	##      宽 22（比一个人还窄）。窄是关键 —— 宽了就又变回"一片区域"。
+	##    ⚠️ 三者是**联动**的：判定用的是「以 center 为准、沿朝向 ±length/2」的矩形，
+	##      所以 `reach` 必须 = (起点 + 终点) / 2 = 108。改一个就要跟着改另外两个。
+	"reach": 110.0,          # 攻击线中心离玩家多远（= (起点 20 + 终点 200) / 2）
+	"length": 200.0,         # 攻击线长度（沿朝向）
+	"width": 24.0,           # 攻击线宽度（垂直朝向）
+	"life": 0.20,            # 气飞完全程用多久（秒）—— ⭐ 0.16 → 0.20：慢下来才看得清"一道气"
 	"windup": 0.15,          # ⭐ M30.7 **前摇**（用户定案）：抬手 0.15 秒后才判定
 	"knockback": 7.0,        # ⭐ 命中时把敌人推开多少像素（轻微击退）
-	## ⭐ 掌风弧光：主角**不持武器** —— 这是「掌心凝灵、拍出一掌」的气流，纯表现，不参与判定。
-	"arc": {
-		"radius": 30.0,
-		"spread": 120.0,     # 扇形张角（度）
-		"life": 0.18,
+	## 普攻的**表现**参数（纯表现，不参与任何判定）
+	"qi": {
+		"life": 0.15,        # 手心蓄气光点活多久（对齐 windup）
+		"hand": 14.0,        # 光点离身体多远（**手心**位置，不是攻击线中心）
+		"tail": 96.0,        # 气尾**最长**多少（实际随行程拉长，这里是上限；短了像飞镖，长了像浪）
+		## ⭐ M33（用户定案「玉青」）：颜色只有这一处真相 —— 气浪、蓄光、命中冲击都用它。
+		##    玉青 = 偏绿的青（G > B > R），和灵印的冷蓝、地面的黄绿都能分开。
+		"color": Color(0.34, 0.87, 0.73),
 	},
 }
 
@@ -154,10 +156,13 @@ const CULTIVATE := {
 ##    回溯下限 = 没有了（可以退到本局最早，随机性彻底放开）。
 const ANCHOR := {
 	"save_path": "user://yunling_save.json",
-	## ⭐ M27（用户定案）：**每 10 分钟**自动存一次（原来是 60 秒 —— 太频繁，每次都在写盘）。
-	##    ⚠️ 别跟上面 DEPTH 的 frame_every_sec（每 60 秒拍一帧）搞混：
-	##       那是**时间线**的粒度（只存在内存里，给盲跳回溯用），跟写盘无关。
-	"autosave_sec": 600.0,
+	## ⭐⭐ M33（用户定案）：「**先把自动存档关了**」—— 600 秒 → **0 = 关闭**。
+	##    ⚠️ `0` 是**语义值**，不是"每 0 秒存一次"：定时器见 `Game._process` 里的守卫，
+	##       `<= 0` 直接跳过整段。把它改回正整数就恢复自动存档，不用动别的地方。
+	##    ⚠️ 关掉的只是**定期**这一条。另外两条写盘路径**仍然存在**：
+	##       ① 关窗口 / 停止运行（`Game._notification`）② 主角死亡（`_on_player_died`）。
+	##       想让整局都不落盘，那两条也要一起关 —— 但那样退出即丢失全部进度。
+	"autosave_sec": 0.0,
 }
 
 ## ---------------- 印诀（M22 / 结印 M26）----------------
@@ -296,7 +301,17 @@ const SEALS := {
 	"玄甲印": {
 		"tags": ["岩", "守"],        # 标签：印诀与（将来）推演都靠它
 		"shape": "hex",        # 形状语言：一眼认出是哪个印（先简化成几何图形）
-		"rank": 1,                   # 十等：一等凡印
+		## ⭐ M31.4（用户拍板）：**1 → 2（一等凡印 → 二等）**。
+		##    `WORLD_SITES` 里 M01 秘境给的玄甲印本来就是 `"rank": 2`，
+		##    表里却是 1 —— 同一个印两个品阶，谁读表谁被坑。这里对齐到 2。
+		## ⚠️⚠️ **另外两处 rank 改动本轮不做，只写目标值，别顺手改**：
+		##    - **磐石印 1 → 3**：配 `REALMS[1]`（炼气）`seal_rank_max == 2` ⇒
+		##      rank 3 会被 `Player.is_sealed()` 判成封印，而 harness 跑在炼气期，
+		##      连带 5 条断言失败；要修就得动 `Game.gd` 的 harness（别人在改）。
+		##    - **辉光印 2 → 3**：**同一条因果链**，同上。
+		##    ⇒ 等 `Game.gd` 腾出手，这两处 + harness **一起改、一起验**，
+		##      分开交会漏（`Game.gd:3130` 附近那条就是典型的假绿灯风险点）。
+		"rank": 2,                   # 十等：二等
 		## 炼化满 100% 后**永久生效**的基础属性（和显化期的 passive 分开算，两者可叠）
 		"base": {"stat": "hp_max", "value": 24},
 		"activate": 8.0,
@@ -456,7 +471,42 @@ const SLOT_DAMAGED_TIME := 60.0
 # ⚠️ M29 起**世界与所有距离减半**（2560×1440 → 1280×720）：相机 zoom = 2，
 #    所以屏幕上看到的范围与改动前**完全一样**（683×384 世界像素 = 1366×768 屏幕像素），
 #    但每个美术像素占 2×2 个屏幕像素 —— 像素颗粒粗一倍，空间关系不变。
-const WORLD := {
+## ⭐⭐ M34：**区域表** —— 「世界」从一组常量变成一行数据。
+##
+## 为什么要它：五大疆域 + 四大绝地 = 九张数据图，塞不进 WORLD_COLS/ROWS 这种常量。
+##    但**数据格式一点没变**：每个区域仍是「一张 N×M 的 PNG（1px = 1 格）+ 一个 sig」，
+##    由 `gen_worldmap.mjs --region=` 烘焙。所以加一个域 = 加一行，不是加一套系统。
+##
+## ⭐ `origin` 是它在**全局格坐标**里的左上角。存档存的是**全局坐标**（origin×32 + 局部像素），
+##    这样以后把「切换」升级成「无缝」时，存档格式不用再动第二次。
+##
+## ⚠️ 骨架期：`east_march` 复用 cangwu 的数据图（同一张 PNG、同一个 sig）。
+##    它的唯一用途是验证「多区域 + 跨区 + 存档带 region」这条链路，不是真内容。
+const REGIONS := {
+	"cangwu": {
+		"name": "苍梧山",
+		"origin": Vector2i(0, 0),
+		"cols": 112,
+		"rows": 96,
+		"map": "res://art/world/worldmap.png",
+		"sig": "res://art/world/worldmap.sig",
+		"neighbors": {"east": "east_march"},
+	},
+	"east_march": {
+		"name": "东荒边地（骨架区）",
+		"origin": Vector2i(112, 0),
+		"cols": 112,
+		"rows": 96,
+		"map": "res://art/world/worldmap.png",
+		"sig": "res://art/world/worldmap.sig",
+		"neighbors": {"west": "cangwu"},
+	},
+}
+const START_REGION := "cangwu"
+## 当前区域。⚠️ static var 不是 const：切区要改它。
+static var current_region := START_REGION
+## 世界容器。⚠️ 也变成 static var —— 它的值跟着当前区域走（原来是 const）。
+static var WORLD := {
 	## ⭐ M31 Step 0：**世界容器 3584×3072**（= 112×96 格 × 32px）——《40 屏世界容器架构方案》定案。
 	##    ⚠️ 上一版是 5120×2880（160×90 格）：横向收窄 30%、纵向加高 6.7%，
 	##    纵横比从 16:9 变成 7:6。旧存档坐标按比例缩放后 clamp（见 SaveGame.VERSION 8）。
@@ -481,10 +531,51 @@ const CAMERA_ZOOM := 2.0
 ## ⭐⭐ M30.13c：**世界数据表**（由 `art/tools/gen_worldmap.mjs` 导出，112×96 格 × 32px）
 ##    R = 地形 id×50 / G = 海拔 / B = 水深 —— **渲染与玩法读同一张表**。
 ##    ⚠️ 绝不在 GDScript 里重算噪声：那会让「画出来的山」和「判定里的山」变成两座山。
-const WORLD_MAP_PATH := "res://art/world/worldmap.png"
-const WORLD_COLS := 112
-const WORLD_ROWS := 96
+## ⚠️ 这三个也是**当前区域派生**的（原先是 const）。切区时由 `set_region()` 改。
+static var WORLD_MAP_PATH := "res://art/world/worldmap.png"
+static var WORLD_COLS := 112
+static var WORLD_ROWS := 96
 const WORLD_CELL := 32.0
+
+## ---- 区域 API（M34）----
+static func region_cfg(id: String) -> Dictionary:
+	return REGIONS.get(id, {}) as Dictionary
+
+static func region_ids() -> Array:
+	return REGIONS.keys()
+
+## 这个区域的世界尺寸（像素）。⚠️ 和 `WORLD["size"]` 的区别：后者是**当前**区域的。
+static func region_size(id: String) -> Vector2:
+	var cfg := region_cfg(id)
+	return Vector2(float(cfg.get("cols", 0)) * WORLD_CELL, float(cfg.get("rows", 0)) * WORLD_CELL)
+
+## 这个区域左上角的**全局像素坐标**。
+static func region_origin(id: String) -> Vector2:
+	var o: Vector2i = region_cfg(id).get("origin", Vector2i.ZERO) as Vector2i
+	return Vector2(float(o.x) * WORLD_CELL, float(o.y) * WORLD_CELL)
+
+static func local_to_global(id: String, local_pos: Vector2) -> Vector2:
+	return region_origin(id) + local_pos
+
+static func global_to_local(id: String, global_pos: Vector2) -> Vector2:
+	return global_pos - region_origin(id)
+
+static func neighbors_of(id: String) -> Dictionary:
+	return region_cfg(id).get("neighbors", {}) as Dictionary
+
+## 切到某个区域：把所有「当前区域派生」的量一起换掉。
+## ⚠️ 返回 false = id 不存在。调用方**必须**处理，不能假设切成功。
+static func set_region(id: String) -> bool:
+	if not REGIONS.has(id):
+		return false
+	current_region = id
+	var cfg := region_cfg(id)
+	WORLD_COLS = int(cfg["cols"])
+	WORLD_ROWS = int(cfg["rows"])
+	WORLD_MAP_PATH = str(cfg["map"])
+	WORLD_SIG_PATH = str(cfg["sig"])
+	WORLD = {"size": region_size(id)}
+	return true
 ## 地形 id → 名字。⚠️ 顺序必须和生成器里的 T 一致（水/草/林/山/灵田/泥沼）
 const WORLD_TERRAINS := ["水泽", "草地", "竹林", "灵岩", "灵田", "泥沼"]
 ## 崖的判定阈值：相邻格高差超过它就算一面崖
@@ -521,22 +612,34 @@ const CLIFF_STEP := 0.06
 ##    ⚠️ 已作废判据「`ELEV_LIFT ≤ 视口半屏高`」：整片平移、上缘由下方同海拔格补位，
 ##      该判据与画面表现无关（当时那条"实测 0% 未覆盖"是在坏探针下测的，无效）。
 ##      padding 只决定画哪些格、不改变画在哪；抬升向上，需要补的只有 `pad_dn`（已补）。
-const ELEV_LIFT := 200.0
+## ⭐⭐ M33（用户拍板）：「**全是平坦的地面**」—— 抬升 200 → **0**。
+##    ⇒ 上面那一整段关于「暗缝 / 裙边 / LIFT 上限」的分析**全部作废**：
+##      缝高 = Δe × LIFT = 0，几何上不可能再露缝，也不需要裙边。
+##      （那段注释保留是有意的：它记录了"为什么曾经要 200、以及怎么算的"，
+##       将来若想恢复立体，从那里接着读，不要重新踩一遍。）
+##    ⇒ 高度数据本身**还在**（worldmap 的 G 通道），只是不再参与绘制；
+##      `_draw_world_height` 的"按海拔排序"仍然执行 —— 平地时它退化成一次无意义的排序，
+##      代价可忽略，好处是不用再写一条"平地专用"的分支（两套渲染路径才是真正的风险）。
+const ELEV_LIFT := 0.0
 
-static var _world_img: Image = null
-static var _world_tried := false
+## ⭐ M34：缓存按**路径**分，不是一个字段 —— 来回切区时不用反复解码同一张图。
+##    ⚠️ null 也缓存（和旧实现的 `_world_tried` 一个道理）：美术没导出时不至于每帧重试。
+static var _world_imgs: Dictionary = {}
 
 ## 读一次就缓存（112×96 很小；**不要每帧读**）
 static func world_image() -> Image:
-	if not _world_tried:
-		_world_tried = true
-		var tex: Texture2D = load(WORLD_MAP_PATH) as Texture2D
-		if tex != null:
-			var img := tex.get_image()
-			if img != null and img.is_compressed():
+	if _world_imgs.has(WORLD_MAP_PATH):
+		return _world_imgs[WORLD_MAP_PATH] as Image
+	var out: Image = null
+	var tex: Texture2D = load(WORLD_MAP_PATH) as Texture2D
+	if tex != null:
+		var img := tex.get_image()
+		if img != null:
+			if img.is_compressed():
 				img.decompress()
-			_world_img = img
-	return _world_img
+			out = img
+	_world_imgs[WORLD_MAP_PATH] = out
+	return out
 
 static func world_ready() -> bool:
 	var img := world_image()
@@ -546,7 +649,8 @@ static func world_ready() -> bool:
 ## ⭐ M31.3：**世界图签名**（`world_sig`）—— 重烘焙 `worldmap.png` 的**安全网**。
 ##
 ## 为什么必须先装它：改这张图会**静默**连带改三样东西，且三者都没有任何检测机制 ——
-##   ① `speed_mult_at()` 的 `elev >= 0.65` 高地减速 ×0.85（档位一变，移动手感暗中改）
+##   ① `speed_mult_at()` 的涉水减速（M31.4 起**高地减速已删除**，只剩涉水 ×0.60；
+##      阈值不再依赖海拔直方图，但深水的分布仍随重烘焙变化）
 ##   ② `gen_worldmap.mjs` 里写死 `e01 = 0.4` 的出生点（LEVELS 一改可能落到水里或崖上）
 ##   ③ 同心层 / 主城的地块排布（山长在哪儿会变）
 ## 签名把「意外改动」变成「必须显式确认的改动」：重烘焙后自测必红，逼人去更新基线。
@@ -555,7 +659,7 @@ static func world_ready() -> bool:
 ##   ① **不用引擎的 `hash()`** —— 它的实现不保证跨版本 / 跨机器一致；签名必须可复现。
 ##      这里自己写两个 32 位整数哈希（FNV-1a + SDBM），纯整数运算，到哪台机器都一样。
 ##   ② 输入是**解码后的 RGBA8 像素**，不是文件字节 —— 换个编码器重导出、像素没变就不该报警。
-const WORLD_SIG_PATH := "res://art/world/worldmap.sig"
+static var WORLD_SIG_PATH := "res://art/world/worldmap.sig"
 
 
 static func _sig_fnv(b: PackedByteArray) -> int:
@@ -607,6 +711,17 @@ static func cell_depth(cx: int, cy: int) -> float:
 static func in_map(c: Vector2i) -> bool:
 	return c.x >= 0 and c.y >= 0 and c.x < WORLD_COLS and c.y < WORLD_ROWS
 
+## ⭐ M33：**格坐标哈希** —— 地表碎屑、装饰物、瓦片变体，凡"看起来随机"的东西都由它决定。
+##
+## 为什么不用 `randf()`：这些东西要在 `_draw` / 构建期决定，而 `_draw` 每帧都跑 ——
+##    随机数会让同一根草每帧跳位置（闪），还违反「_draw 里不许分配」的红线。
+## 为什么不用引擎的 `hash()`：它不保证跨版本 / 跨机器一致（和 `world_sig` 同一条纪律）。
+## ⚠️ 放在 GameData 而不是 Game：静态世界和地形是**同一套坐标**，哈希也只有一份，
+##    否则「Game 里算的草」和「Props 里算的石头」会落在两套互不相干的位置上。
+static func cell_hash(cx: int, cy: int) -> int:
+	return absi((cx * 73856093) ^ (cy * 19349663) ^ 0x5BD1E995)
+
+
 static func cell_of(pos: Vector2) -> Vector2i:
 	return Vector2i(int(floor(pos.x / WORLD_CELL)), int(floor(pos.y / WORLD_CELL)))
 
@@ -637,18 +752,31 @@ static func can_step(from_pos: Vector2, to_pos: Vector2) -> bool:
 	return true
 
 
-## 地形速度倍率：涉水明显变慢、高地略慢（「山上有分量」）、平地正常
+## 地形速度倍率：**只有涉水变慢**，平地 / 高地一律正常。
+##
+## ⭐⭐ M31.4（用户拍板）：**高地减速 `elev >= 0.60 → ×0.85` 已删除**。
+##    它原来长这样（删掉的那两行）：
+##        if elev_at_pos(pos) >= 0.60:
+##            return 0.85
+##    删除理由（用户原话 + 柯桥良 grep 核实后的依据）：
+##      ① **地图做成平面之后，玩家踩上去会莫名变慢，而画面上没有任何提示。**
+##         减速是一种惩罚，惩罚必须**看得见**——水是画得出来的（有贴图、有颜色），
+##         所以涉水减速玩家能自己归因；高地在这张图上是看不见的，变慢就是"玄学掉帧"。
+##      ② 它覆盖 **约 38.6% 的格子**（M31.3 重烘焙时的实测：阈值 0.60 = 12/20，
+##         13/20 给 28.5%，12/20 给 38.2%）—— 超过三分之一的地图在偷偷减速，
+##         玩家对"基础移动速度"的直觉会被整体拉低且无法校准。
+##    ⚠️ 阈值曾经是 0.62，M31.3 重烘焙时改成 0.60 —— 因为阈值必须**正好落在
+##       量化网格的某一级上**（k/20），否则减速带的边界会切在台面中间。
+##       （这条纪律本身没错，只是整条规则现在被删了，留着给将来要加回来的人看。）
+##
+## ⚠️ 删完之后只剩一条：`depth > 0 → ×0.60`。
+##    已知唯一的调用方假设：`Game.gd` 有一条断言用 `speed_mult_at(深水点) < 1.0`
+##    来验「深水确实减速」—— 它读的是涉水那一条，**不受本次删除影响**。
+##    另一个调用方 `Player.gd:298`（`mult *= speed_mult_at(position)`）只是相乘，
+##    乘 1.0 与乘 0.85 都合法，不存在"必须 < 1"的隐含契约。
 static func speed_mult_at(pos: Vector2) -> float:
 	if depth_at_pos(pos) > 0.0:
 		return 0.60
-	## ⭐ M31.3 重烘焙：0.62 → **0.60（= 12/20）**。
-	##    规则：阈值必须**正好落在量化网格的某一级上**（k/20），否则减速带的边界会切在
-	##    台面中间 —— 玩家「看着还在坡上，脚感却已经变了」。k/20 让减速边界与台缘重合。
-	##    ⚠️ 取哪一级是**实测**定的，不是拍的：烘焙脚本会打印海拔直方图，
-	##    13/20 实测只给 28.5%（低于目标 30~45%），12/20 给 **38.2%**（正中间）。
-	##    ⚠️ 重烘焙后这张直方图会变 —— **改了烘焙就要回来复核这一级**，别让它悄悄跑偏。
-	if elev_at_pos(pos) >= 0.60:
-		return 0.85
 	return 1.0
 
 
@@ -670,6 +798,90 @@ const WORLD_TERRAIN_COLORS := {
 	## ⚠️ 必须和「水泽」一眼分得开 —— 水泽偏蓝（B 最高），泥沼偏黄褐（R>G>B，B 最低）。
 	"泥沼": Color(0.22, 0.19, 0.09),
 }
+
+
+# ============ M31.4：同心层（全图界面的四色环带 + 内容点的层归属）============
+## ⭐⭐ 同心层取代了原来的「四象限」：`ZONES` 只给敌人/采集点打标签，而同心层同时管
+##    **全图界面的四条环带** 与 **每个内容点的层归属**。层号 1..4，**1 = 最里面（主城所在）**。
+##
+## ⚠️⚠️ **判据用 ρ（矩形归一化距离），不用欧氏距离** —— 这是硬要求，别改：
+##    ```
+##    ρ = max(|x − cx| / cx, |y − cy| / cy)          # cx,cy = 世界中心；ρ ∈ [0,1]
+##    L1: ρ ≤ 0.52   L2: 0.52 < ρ ≤ 0.71   L3: 0.71 < ρ ≤ 0.86   L4: ρ > 0.86
+##    ```
+##    为什么：地图是 3584×3072 的**长方形**，按圆形半径硬切会让**四个角落在所有环之外**，
+##    等于凭空长出「第五层」（角上永远是最外层的"更外层"）。ρ 的等值线是与地图边界
+##    **相似的长方形** ⇒ 沿任何方向走到边界都意味着到了最外层，梯度在所有方向上一致。
+##
+## ⚠️⚠️ **层名是「地界名」，不是地形描述**（用户知情后拍板，不是遗漏）：
+##    地图是噪声随机生成的，实测 `worldmap.png` 里 **L4 只有 1.5%（47/3135 格）是泥沼**，
+##    **42% 是灵岩**；灵岩在四层里均匀占 32%~42%（各层都是它最多）。
+##    ⇒ 层的视觉存在感来自**全图界面的四色环带**，不来自脚下地形。
+##    ⇒ **别试图"修正"地形去匹配层名，也别因为"这层没有泥沼"就去改层名。**
+const CONCENTRIC_THRESHOLDS := [0.52, 0.71, 0.86]
+## ⭐ 下标 = 层号（0 号位留空，这样 `RING_NAMES[ring_at(pos)]` 直接能用）
+const RING_NAMES := ["", "苍茫草海", "疏林", "碎石坡", "泥沼"]
+
+
+## 归一化矩形距离 ρ ∈ [0,1]（0 = 世界正中，1 = 地图边界）
+static func ring_rho(pos: Vector2) -> float:
+	var h: Vector2 = WORLD["size"] * 0.5
+	return maxf(absf(pos.x - h.x) / h.x, absf(pos.y - h.y) / h.y)
+
+
+## 某个世界坐标属于哪一层（1..4）。判据见上：`CONCENTRIC_THRESHOLDS`。
+static func ring_at(pos: Vector2) -> int:
+	var r := ring_rho(pos)
+	for i in range(CONCENTRIC_THRESHOLDS.size()):
+		if r <= float(CONCENTRIC_THRESHOLDS[i]):
+			return i + 1
+	return CONCENTRIC_THRESHOLDS.size() + 1
+
+
+static func ring_name(pos: Vector2) -> String:
+	return RING_NAMES[clampi(ring_at(pos), 0, RING_NAMES.size() - 1)]
+
+
+## ⭐ M31.4：**深水判定的唯一口径** —— PNG 的 **B 通道 ≥ 128**。
+##    `depth > 0.5` ⟺ `b/255 > 0.5` ⟺ `b > 127.5` ⟺ **整数域 `b >= 128`**。
+##    ⚠️ 写成 `> 128` 会把全图 **46 格真深水（B 恰好 = 128，depth = 0.50196）误判成可走**
+##       （实测：46 = 城外 39 + 城中 7）。投点池里混进这 46 格 ⇒ 症状是「采集点刷在湖心」，
+##       和早先 e08 辉光印落在深水里是**同一个故障模式**。
+##    ⚠️ 全工程只允许这一处定义，别在别处重写一遍（口径散落两处 = 迟早对不上）。
+static func is_deep_cell(cx: int, cy: int) -> bool:
+	return int(round(cell_depth(cx, cy) * 255.0)) >= 128
+
+
+static func is_deep_at(pos: Vector2) -> bool:
+	var c := cell_of(pos)
+	return in_map(c) and is_deep_cell(c.x, c.y)
+
+
+## 主城平台（出生点所在的 32×32 格方台）。⚠️ `range(cc-16, cc+16)` 是**右开**区间，
+## 所以是 32 格不是 33 格 —— 见 `_check_world_terrain()` 里的「出生点平坝」注释。
+static func city_rect() -> Rect2:
+	var h: Vector2 = WORLD["size"] * 0.5
+	return Rect2(h.x - 16.0 * WORLD_CELL, h.y - 16.0 * WORLD_CELL,
+			32.0 * WORLD_CELL, 32.0 * WORLD_CELL)
+
+
+## ⭐ 四层「可站立格池」（投点的候选集）：非深水 + 主城平台之外。
+##    ⚠️ 取样一律用**格心**（`c*CELL + CELL/2`）：判定层归属时取样点不统一，分层数就会漂
+##       （实测：格左上角 vs 格心，L1 能差 10 格、L4 能差 168 格）。
+##    ⚠️ 实测值 = **[1701, 2229, 2144, 2668]，合计 8742**（M31.4 柯桥良实测，与技架一致）。
+static func ring_pool() -> Array:
+	var out := [0, 0, 0, 0]
+	var cr := city_rect()
+	for cy in range(WORLD_ROWS):
+		for cx in range(WORLD_COLS):
+			if is_deep_cell(cx, cy):
+				continue
+			var p := Vector2(float(cx) * WORLD_CELL + WORLD_CELL * 0.5,
+					float(cy) * WORLD_CELL + WORLD_CELL * 0.5)
+			if cr.has_point(p):
+				continue
+			out[ring_at(p) - 1] += 1
+	return out
 
 
 ## ⭐ M31 Step 0：四个区的矩形**从世界尺寸算**，不再写死。
@@ -699,6 +911,104 @@ static func zone_at(pos: Vector2) -> String:
 	return ""
 
 
+# ============ M31.4：世界内容点（单一数据源）============
+## ⭐⭐ `WORLD_SITES` = **世界内容点的唯一出处**。
+##    地图界面（按 M 看全图）与将来的世界实体**都从这一份数据读** ——
+##    **禁止任何地方再复制一份坐标**。为什么这么硬：坐标一旦抄成两份，
+##    「地图上还亮着、世界里已经打死了」这种**地图说谎**就是迟早的事，而且没人会发现。
+##
+## 字段：`id` / `type` / `ring` / `pos` / `label` / `payload`
+##    - `ring` 是**声明值**，必须与 `ring_at(pos)` 一致（有断言守）。
+##    - `payload` 按 type 不同而不同（秘境带 seal+rank、灵潮带 respawn_sec…）。
+##
+## ⚠️ 本轮（M31.4 Step 1）只落**数据层**：世界里的实体挂载（能走进秘境/妖巢）下一步做。
+##    ⇒ 只有「印源」与「传承印出处」同时出现在 `ENEMY_SPAWNS` 里（它们是**带印敌人**）；
+##      秘境 / 妖巢 / 灵潮 / 灵材 / 灵市 目前**只是地图标记，不刷实体**。
+##
+## ⭐⚠️ **9 枚印还缺名字**（这是本轮没闭合的一笔账，已回报 team-lead）：
+##    印的总账 = 灰烬（本命，开局自带）+ 秘境 6（含玄甲）+ 传承强夺 5 + 印源 4 = **16 枚**。
+##    其中 `SEALS` 里**已有** 7 枚：灰烬 / 玄甲 / 惊雷 / 磐石 / 云雨 / 流风 / 辉光。
+##    ⇒ 秘境 M02~M06（5 枚）+ 印源 Y01~Y04（4 枚）共 **9 枚尚未命名/定数值** ——
+##      这是**设计侧**的活（命名 + 印诀 + 数值），不是数据录入，我不擅自编 9 套数值。
+##      `payload.seal` 暂留空串，断言只数**出点**（16），不要求每枚都有实体定义；
+##      一旦命名落地，填进 `SEALS` 并把这里补上即可（`_check_seal_refs()` 会立刻开始守引用）。
+const WORLD_SITES := [
+	# ---- 秘境 6（产秘境印；M01 出玄甲印 ---- 教学印，不走梯度）----
+	{"id": "M01", "type": "秘境", "ring": 1, "pos": Vector2(2640.0, 912.0), "label": "苍茫草海·秘境",
+		"payload": {"seal": "玄甲印", "rank": 2, "waves": 2}},
+	{"id": "M02", "type": "秘境", "ring": 2, "pos": Vector2(2960.0, 1456.0), "label": "疏林·秘境",
+		"payload": {"seal": "", "rank": 3, "waves": 3}},
+	{"id": "M03", "type": "秘境", "ring": 2, "pos": Vector2(1168.0, 2608.0), "label": "疏林·秘境",
+		"payload": {"seal": "", "rank": 3, "waves": 3}},
+	{"id": "M04", "type": "秘境", "ring": 3, "pos": Vector2(3280.0, 2448.0), "label": "碎石坡·秘境",
+		"payload": {"seal": "", "rank": 4, "waves": 3}},
+	{"id": "M05", "type": "秘境", "ring": 3, "pos": Vector2(1456.0, 240.0), "label": "碎石坡·秘境",
+		"payload": {"seal": "", "rank": 4, "waves": 3}},
+	{"id": "M06", "type": "秘境", "ring": 4, "pos": Vector2(112.0, 2864.0), "label": "泥沼·秘境",
+		"payload": {"seal": "", "rank": 5, "waves": 4}},
+	# ---- 妖巢 6 ----
+	{"id": "N01", "type": "妖巢", "ring": 1, "pos": Vector2(912.0, 1808.0), "label": "苍茫草海·妖巢",
+		"payload": {"waves": 2}},
+	{"id": "N02", "type": "妖巢", "ring": 2, "pos": Vector2(1808.0, 2608.0), "label": "疏林·妖巢",
+		"payload": {"waves": 2}},
+	{"id": "N03", "type": "妖巢", "ring": 3, "pos": Vector2(2800.0, 2832.0), "label": "碎石坡·妖巢",
+		"payload": {"waves": 3}},
+	 ## ⚠️ N04 原坐标 (2192,2864)：实测 ρ=0.8646 属 **L4**（表里标 L3，对不上），
+	 ##    且离 L3/L4 边界只有 **7 世界像素** —— 就算改标 L4，标记也会被地图界纹线压住。
+	 ##    ⇒ 往北挪到 y=2800（ρ=0.8229，L3，离边界 57px）。
+	{"id": "N04", "type": "妖巢", "ring": 3, "pos": Vector2(2192.0, 2800.0), "label": "碎石坡·妖巢",
+		"payload": {"waves": 3}},
+	{"id": "N05", "type": "妖巢", "ring": 4, "pos": Vector2(144.0, 848.0), "label": "泥沼·妖巢",
+		"payload": {"waves": 3}},
+	{"id": "N06", "type": "妖巢", "ring": 4, "pos": Vector2(3472.0, 2896.0), "label": "泥沼·妖巢",
+		"payload": {"waves": 4}},
+	# ---- 灵潮 4（限时刷新）----
+	{"id": "T01", "type": "灵潮", "ring": 1, "pos": Vector2(2544.0, 1712.0), "label": "苍茫草海·灵潮",
+		"payload": {"respawn_sec": 300.0}},
+	{"id": "T02", "type": "灵潮", "ring": 2, "pos": Vector2(2928.0, 2000.0), "label": "疏林·灵潮",
+		"payload": {"respawn_sec": 300.0}},
+	{"id": "T03", "type": "灵潮", "ring": 3, "pos": Vector2(432.0, 1488.0), "label": "碎石坡·灵潮",
+		"payload": {"respawn_sec": 300.0}},
+	{"id": "T04", "type": "灵潮", "ring": 4, "pos": Vector2(1936.0, 176.0), "label": "泥沼·灵潮",
+		"payload": {"respawn_sec": 300.0}},
+	# ---- 灵材富集 6 ----
+	{"id": "R01", "type": "灵材富集", "ring": 2, "pos": Vector2(560.0, 656.0), "label": "疏林·灵材富集",
+		"payload": {"items": ["赤炎花"]}},
+	{"id": "R02", "type": "灵材富集", "ring": 3, "pos": Vector2(3248.0, 592.0), "label": "碎石坡·灵材富集",
+		"payload": {"items": ["雷纹石"]}},
+	{"id": "R03", "type": "灵材富集", "ring": 3, "pos": Vector2(720.0, 2704.0), "label": "碎石坡·灵材富集",
+		"payload": {"items": ["雷纹石"]}},
+	{"id": "R04", "type": "灵材富集", "ring": 4, "pos": Vector2(3440.0, 1232.0), "label": "泥沼·灵材富集",
+		"payload": {"items": ["玄霜髓"]}},
+	{"id": "R05", "type": "灵材富集", "ring": 4, "pos": Vector2(144.0, 2000.0), "label": "泥沼·灵材富集",
+		"payload": {"items": ["太虚核"]}},
+	{"id": "R06", "type": "灵材富集", "ring": 4, "pos": Vector2(1424.0, 2960.0), "label": "泥沼·灵材富集",
+		"payload": {"items": ["灵魄"]}},
+	# ---- 灵市 4（商店驻点；不卖印，只清货/补给）----
+	{"id": "P01", "type": "灵市", "ring": 2, "pos": Vector2(2288.0, 2384.0), "label": "疏林·灵市",
+		"payload": {"services": ["essence"]}},
+	{"id": "P02", "type": "灵市", "ring": 3, "pos": Vector2(2288.0, 432.0), "label": "碎石坡·灵市",
+		"payload": {"services": ["essence"]}},
+	{"id": "P03", "type": "灵市", "ring": 4, "pos": Vector2(3376.0, 1744.0), "label": "泥沼·灵市",
+		"payload": {"services": ["essence"]}},
+	{"id": "P04", "type": "灵市", "ring": 4, "pos": Vector2(816.0, 176.0), "label": "泥沼·灵市",
+		"payload": {"services": ["essence"]}},
+	# ---- 印源 4（带印敌人，打死可强夺）---- ⚠️ seal 待命名，见 WORLD_SITES 头注释
+	{"id": "Y01", "type": "印源", "ring": 2, "pos": Vector2(560.0, 2160.0), "label": "疏林·印源",
+		"payload": {"seal": "", "rank": 2}},
+	{"id": "Y02", "type": "印源", "ring": 3, "pos": Vector2(2704.0, 272.0), "label": "碎石坡·印源",
+		"payload": {"seal": "", "rank": 3}},
+	{"id": "Y03", "type": "印源", "ring": 4, "pos": Vector2(176.0, 2448.0), "label": "泥沼·印源",
+		"payload": {"seal": "", "rank": 4}},
+	{"id": "Y04", "type": "印源", "ring": 4, "pos": Vector2(3472.0, 176.0), "label": "泥沼·印源",
+		"payload": {"seal": "", "rank": 4}},
+]
+
+## ⭐ 印的**唯一出处总账**（16 枚）：灰烬（本命）+ 秘境 6（含玄甲）+ 传承强夺 5 + 印源 4。
+##    ⚠️ 这 5 条「传承印出处」同时是 `ENEMY_SPAWNS` 里的 e07/e08/e09/e12/e13（带 `carries`）。
+const SEAL_SOURCE_LEGACY := ["流风印", "辉光印", "云雨印", "惊雷印", "磐石印"]
+
+
 # ---------------- 物品（M8）----------------
 ## 材料表。⭐ 设计圣经 §3.6：材料按**来源**分类，不按颜色分类 ——
 ## 每一类都对应一条灵印线，所以合炼配方是**可推理的**，玩家能自己摸索。
@@ -719,7 +1029,40 @@ const MATERIALS := {
 	"灵魄":   {"kind": "兽材", "color": Color(0.70, 0.86, 0.92), "price": 22, "volume": 2, "refine": 9},
 	"地火芯": {"kind": "触媒", "color": Color(0.95, 0.55, 0.25), "price": 40, "volume": 3, "refine": 15},
 	"雷髓":   {"kind": "触媒", "color": Color(0.72, 0.68, 1.00), "price": 45, "volume": 3, "refine": 18},
+	## ⭐⭐ M31.4 新增两种**顶层触媒**（用户拍板：给灵石一个"贵得有理由"的出口）。
+	##    为什么需要它们：原来最贵的材料是雷髓 45 —— 商人货架最贵那件也就 60。
+	##    于是"攒一大笔灵石"在中期之后**没有对应物可买**，灵石出口只剩买灵力（10/25 点）。
+	##    60 / 70 这两档把**顶层合炼**变成一笔要攒一阵子的钱，出口才有纵深。
+	## ⚠️ 定位：**只在外圈产出**（L4 的采集点 g23 / g24 各一处，全图仅此两份），
+	##    与"越往外越值钱"的同心层梯度一致 —— 别塞进商人货架，否则梯度当场塌掉。
+	##    （商人货架的意义是"救急"，不是"毕业装备商店"。）
+	"玄霜髓": {"kind": "触媒", "color": Color(0.62, 0.86, 0.95), "price": 60, "volume": 3, "refine": 24},
+	"太虚核": {"kind": "触媒", "color": Color(0.90, 0.80, 0.45), "price": 70, "volume": 3, "refine": 30},
 }
+
+## ⭐ M31.4：**材料表条目齐全**（守语义，不守个数）。
+##    为什么要有它：`Game.gd` 里那条 `_check("材料表有 8 种", MATERIALS.size() == 8)` 是
+##    **写死旧数字** —— 加一种材料它就红，逼人回来改一个没有任何意义的常数；
+##    更糟的是它会让人以为「改个数就好了」，于是漏掉真正该守的东西（字段齐全）。
+##    ⇒ 改成 `MATERIALS.size() >= 8 and GameData.materials_well_formed()`：
+##      「只许增不许减」+「每种都有 kind / price / volume / color」。
+## ⚠️ `price` / `volume` 必须**是数字且 > 0**：price=0 会让商人白送，volume=0 会让背包无限装。
+static func materials_well_formed() -> bool:
+	for k in MATERIALS.keys():
+		var m: Dictionary = MATERIALS[k]
+		if not (m.has("kind") and m.has("price") and m.has("volume") and m.has("color")):
+			return false
+		if float(m["price"]) <= 0.0 or int(m["volume"]) <= 0:
+			return false
+		if not KIND_VOLUME.has(str(m["kind"])):
+			return false
+	return true
+
+## 材料类别 → 单件容积。⚠️ 与 `volume` 字段**对不上就是 bug**（类别决定手感，字段决定算数），
+## 所以 `materials_well_formed()` 顺手查这张表 —— 加新材料时如果写错类别会被抓到。
+## ⭐ 类别同时决定**手感**：草木轻（1）/ 兽材中（2）/ 矿石与触媒沉（3），
+##    于是「值钱但占地方」与「便宜但好带」同时存在，出门带什么才是个选择。
+const KIND_VOLUME := {"草木": 1, "兽材": 2, "矿石": 3, "触媒": 3}
 
 ## 商人（M14）。⭐ 待决问题 10 的落地：**一个**商人、放在世界中心锚点旁（安全区）、
 ## **货架一次性、不补货** —— 想买东西就得先出门把灵石赚回来。
@@ -789,21 +1132,56 @@ const GATHER := {
 	## ⭐ 两态两张图：满的是一颗灵珠，空的是它的残壳。外面那圈光晕仍由代码画（那是状态）。
 	"visual": {"texture": "res://art/world/gather_full.png",
 		"empty_texture": "res://art/world/gather_empty.png"},
-	## ⭐ 每区 2 处，都离锚点（世界中心）有一段路 —— 想采就得先走出去。
-	## ⭐ 一处采集点 = 位置 + 产出 + 数量，写在同一个 dict 里。
+	## ⭐ 一处采集点 = 位置 + 产出 + 数量 + 层号，写在同一个 dict 里。
 	##    （不做「positions 与 yields 两个数组顺序必须对齐」那种平行表 —— 一旦错位没人发现。）
-	## 产出规则：安全区（草原 / 岩区）给大宗基础材；危险区（雷区 / 热区）给**触媒**。
-	## 这就是「去哪采」的第一层风险回报。
-	## ⭐ M31 Step 0：`id`（g01…g08）= 稳定标识，用途同 ENEMY_SPAWNS 的 id（本轮只加字段）。
+	## ⭐ M31 Step 0：`id`（g01…g24）= 稳定标识，用途同 ENEMY_SPAWNS 的 id。
+	##
+	## ⭐⭐ M31.4：**整表作废重建**（旧的 8 个点是「四象限每区 2 处」时代的产物）。
+	##    新规则（用户拍板）：**每层 6 个，共 24 个；采集时可能被怪扑。**
+	##    - 为什么按层而不是按象限：全图界面（按 M）显示的是**同心环带**，
+	##      「每层有几个点」是玩家能直接读出来的信息；四象限只是历史标签。
+	##    - **「可能被扑」是设计，不是缺陷**：每个点 240px 内都埋了杂怪 spawn
+	##      （240 = 最大 aggro 170 + 70 位移余量）。采一口要冒被扑的风险，
+	##      这是「去哪采」的第一层风险回报；旧表那 8 个点周围全是空地，采得太安稳。
+	##      ⇒ 这条有断言盯着：`tests/world_data_test.gd` 第 4 段。
+	##
+	## 产出梯度（跟着层走，越往外越值钱）：
+	##    L1 蕴灵草（草木，4/件） / L2 玄铁矿（矿石，12/件） /
+	##    L3 雷纹石（矿石，16/件） / L4 触媒（地火芯 40 / 雷髓 45 / 玄霜髓 60 / 太虚核 70）
+	## ⭐ 顶层触媒 玄霜髓 / 太虚核 **全图各只有一份**（g23 / g24），且都在 L4 最外圈。
+	##
+	## ⚠️ 每个点的 `ring` 是**实测**（用 `ring_at()` 算的），不是抄的；
+	##    所有点都已核实：非深水（B < 128）、地形非「水泽」、不在主城矩形内。
+	##    ⚠️ 唯一贴边的一点：g05 / m53 在 y=2064，主城矩形南边界是 2048 —— 只差 16px。
 	"spots": [
-		{"id": "g01", "pos": Vector2(420.0, 469.3),   "item": "蕴灵草", "amount": 2},   # 草原
-		{"id": "g02", "pos": Vector2(1260.0, 298.7),    "item": "蕴灵草", "amount": 2},   # 草原
-		{"id": "g03", "pos": Vector2(2380.0, 426.7),   "item": "玄铁矿", "amount": 2},   # 岩区
-		{"id": "g04", "pos": Vector2(3220.0, 1109.3),  "item": "玄铁矿", "amount": 2},   # 岩区
-		{"id": "g05", "pos": Vector2(448.0, 2517.3),   "item": "雷纹石", "amount": 2},   # 雷区
-		{"id": "g06", "pos": Vector2(1204.0, 2816.0),   "item": "雷髓",   "amount": 1},   # 雷区（触媒）
-		{"id": "g07", "pos": Vector2(2464.0, 2645.3),   "item": "赤炎花", "amount": 2},   # 热区
-		{"id": "g08", "pos": Vector2(3248.0, 2090.7),  "item": "地火芯", "amount": 1},   # 热区（触媒）
+		# ---- L1 苍茫草海（6）----
+		{"id": "g01", "pos": Vector2(1168.0, 944.0),  "item": "蕴灵草", "amount": 2, "ring": 1},
+		{"id": "g02", "pos": Vector2(1456.0, 976.0),  "item": "蕴灵草", "amount": 2, "ring": 1},
+		{"id": "g03", "pos": Vector2(2352.0, 976.0),  "item": "蕴灵草", "amount": 2, "ring": 1},
+		{"id": "g04", "pos": Vector2(2704.0, 1968.0), "item": "蕴灵草", "amount": 2, "ring": 1},
+		{"id": "g05", "pos": Vector2(1424.0, 2064.0), "item": "蕴灵草", "amount": 2, "ring": 1},
+		{"id": "g06", "pos": Vector2(2224.0, 2224.0), "item": "蕴灵草", "amount": 2, "ring": 1},
+		# ---- L2 疏林（6）----
+		{"id": "g07", "pos": Vector2(1232.0, 496.0),  "item": "玄铁矿", "amount": 2, "ring": 2},
+		{"id": "g08", "pos": Vector2(2192.0, 592.0),  "item": "玄铁矿", "amount": 2, "ring": 2},
+		{"id": "g09", "pos": Vector2(688.0, 880.0),   "item": "玄铁矿", "amount": 2, "ring": 2},
+		{"id": "g10", "pos": Vector2(656.0, 1232.0),  "item": "玄铁矿", "amount": 2, "ring": 2},
+		{"id": "g11", "pos": Vector2(752.0, 1776.0),  "item": "玄铁矿", "amount": 2, "ring": 2},
+		{"id": "g12", "pos": Vector2(2608.0, 2608.0), "item": "玄铁矿", "amount": 2, "ring": 2},
+		# ---- L3 碎石坡（6）----
+		{"id": "g13", "pos": Vector2(784.0, 272.0),   "item": "雷纹石", "amount": 2, "ring": 3},
+		{"id": "g14", "pos": Vector2(2832.0, 336.0),  "item": "雷纹石", "amount": 2, "ring": 3},
+		{"id": "g15", "pos": Vector2(3184.0, 1232.0), "item": "雷纹石", "amount": 2, "ring": 3},
+		{"id": "g16", "pos": Vector2(3216.0, 2064.0), "item": "雷纹石", "amount": 2, "ring": 3},
+		{"id": "g17", "pos": Vector2(464.0, 2768.0),  "item": "雷纹石", "amount": 2, "ring": 3},
+		{"id": "g18", "pos": Vector2(1360.0, 2800.0), "item": "雷纹石", "amount": 2, "ring": 3},
+		# ---- L4 泥沼（6）：触媒带。⚠️ 层名是「地界名」不是地形描述，见同心层注释 ----
+		{"id": "g19", "pos": Vector2(112.0, 112.0),   "item": "地火芯", "amount": 1, "ring": 4},
+		{"id": "g20", "pos": Vector2(496.0, 112.0),   "item": "地火芯", "amount": 1, "ring": 4},
+		{"id": "g21", "pos": Vector2(2096.0, 176.0),  "item": "雷髓",   "amount": 1, "ring": 4},
+		{"id": "g22", "pos": Vector2(3408.0, 816.0),  "item": "雷髓",   "amount": 1, "ring": 4},
+		{"id": "g23", "pos": Vector2(112.0, 1136.0),  "item": "玄霜髓", "amount": 1, "ring": 4},
+		{"id": "g24", "pos": Vector2(3376.0, 1776.0), "item": "太虚核", "amount": 1, "ring": 4},
 	],
 }
 
@@ -907,6 +1285,8 @@ const ART_ID := {
 	"灵魄": "wisp",
 	"地火芯": "ember",
 	"雷髓": "marrow",
+	"玄霜髓": "frost",
+	"太虚核": "voidcore",
 	"灵石": "stone",
 }
 
@@ -1047,23 +1427,103 @@ const ENEMY := {
 ## ⭐⭐ M31 Step 0：`id` = **稳定标识**（e01…e13）。它是为「存档从数组下标改成稀疏 id 集合」铺路 ——
 ##    将来增删 / 重排刷新点，存档里已打死的敌人不会串位。**本轮只加字段，不动存档结构**。
 const ENEMY_SPAWNS := [
-	{"id": "e01", "archetype": "猛兽", "pos": Vector2(700.0, 896.0)},       # 草原
-	{"id": "e02", "archetype": "智谋", "pos": Vector2(2940.0, 640.0)},      # 岩区
-	{"id": "e03", "archetype": "猛兽", "pos": Vector2(560.0, 2346.7)},       # 雷区
-	{"id": "e04", "archetype": "智谋", "pos": Vector2(3080.0, 2560.0)},      # 热区
-	{"id": "e05", "archetype": "猛兽", "pos": Vector2(1792.0, 384.0)},        # 北边路口
-	{"id": "e06", "archetype": "智谋", "pos": Vector2(1792.0, 2773.3)},       # 南边路口
-	# ⭐ 三名灵师各带一枚印。雷区故意不放灵师 —— 留一个「只有材料、没有硬仗」的区。
-	{"id": "e07", "archetype": "灵师", "pos": Vector2(868.0, 640.0), "carries": "流风印"},      # 草原
-	{"id": "e08", "archetype": "灵师", "pos": Vector2(3052.0, 896.0), "carries": "辉光印"},     # 岩区
-	{"id": "e09", "archetype": "灵师", "pos": Vector2(2772.0, 2261.3), "carries": "云雨印"},      # 热区
-	# ⚠️ 这只蛮兽原来在 (1600,620) —— 离商人 (1280,592) 只有 322px，正好在它的仇恨圈（330）里，
-	#    站在商人旁边交易会被它追着打。往东挪开，让「锚点 + 商人」这一带真的是安全区。
-	{"id": "e10", "archetype": "蛮兽", "pos": Vector2(2660.0, 1664.0)},       # 中路偏右（真坐标，离商人 956px）
-	{"id": "e11", "archetype": "蛮兽", "pos": Vector2(1372.0, 2560.0)},       # 雷区
-	# ⭐ 精英都摆在**离锚点最远的两个角落** —— 越远越硬，这是最朴素的风险回报梯度
-	{"id": "e12", "archetype": "智谋", "pos": Vector2(3388.0, 362.7), "carries": "惊雷印", "elite": true},     # 岩区深处
-	{"id": "e13", "archetype": "蛮兽", "pos": Vector2(3360.0, 2816.0), "carries": "磐石印", "elite": true},    # 热区深处
+	## ---- 杂怪 62 只（m01…m62）：**只给压力，不给印** ----
+	##    - 原型只有 猛兽 / 智谋 / 蛮兽 三种；**灵师不进杂怪表**（灵师带印，见下面 5 条）。
+	##    - ⚠️ 顺序有讲究：`enemies[0]` 必须是**猛兽**、`enemies[1]` 必须是**智谋**
+	##      （`Game.gd` 有多处 `var foe = enemies[0]  # 猛兽` / `var brain = enemies[1]  # 智谋`）。
+	##      ⇒ 别把 m01 / m02 的原型改掉，也别把带印的那 5 条挪到数组前面。
+	##    - `ring` 是**实测**（`ring_at()` 算的），不是抄的。
+	##    - ⚠️ m50…m62 这 13 只是**为「每个采集点 240px 内有怪」补出来的**（见 GATHER 注释）。
+	##      m53 在 y=2064，主城矩形南边界 2048 —— 只差 16px，是唯一贴边的一只。
+	{"id": "m01", "archetype": "猛兽", "pos": Vector2(1040.0, 1776.0), "ring": 1},
+	{"id": "m02", "archetype": "智谋", "pos": Vector2(880.0, 2160.0),  "ring": 1},
+	{"id": "m03", "archetype": "猛兽", "pos": Vector2(2480.0, 2256.0), "ring": 1},
+	{"id": "m04", "archetype": "智谋", "pos": Vector2(2640.0, 1552.0), "ring": 1},
+	{"id": "m05", "archetype": "猛兽", "pos": Vector2(1008.0, 1968.0), "ring": 1},
+	{"id": "m06", "archetype": "智谋", "pos": Vector2(1488.0, 784.0),  "ring": 1},
+	{"id": "m07", "archetype": "猛兽", "pos": Vector2(1968.0, 2288.0), "ring": 1},
+	{"id": "m08", "archetype": "猛兽", "pos": Vector2(624.0, 2224.0),  "ring": 2},
+	{"id": "m09", "archetype": "智谋", "pos": Vector2(1328.0, 2480.0), "ring": 2},
+	{"id": "m10", "archetype": "蛮兽", "pos": Vector2(880.0, 2608.0),  "ring": 2},
+	{"id": "m11", "archetype": "猛兽", "pos": Vector2(2352.0, 2384.0), "ring": 2},
+	{"id": "m12", "archetype": "智谋", "pos": Vector2(1360.0, 624.0),  "ring": 2},
+	{"id": "m13", "archetype": "蛮兽", "pos": Vector2(880.0, 2384.0),  "ring": 2},
+	{"id": "m14", "archetype": "猛兽", "pos": Vector2(2704.0, 560.0),  "ring": 2},
+	{"id": "m15", "archetype": "智谋", "pos": Vector2(2800.0, 2416.0), "ring": 2},
+	{"id": "m16", "archetype": "蛮兽", "pos": Vector2(2528.0, 712.0),  "ring": 2},
+	{"id": "m17", "archetype": "猛兽", "pos": Vector2(2992.0, 2480.0), "ring": 2},
+	{"id": "m18", "archetype": "智谋", "pos": Vector2(816.0, 1136.0),  "ring": 2},
+	{"id": "m19", "archetype": "蛮兽", "pos": Vector2(688.0, 2768.0),  "ring": 3},
+	{"id": "m20", "archetype": "智谋", "pos": Vector2(2608.0, 400.0),  "ring": 3},
+	{"id": "m21", "archetype": "猛兽", "pos": Vector2(304.0, 784.0),   "ring": 3},
+	{"id": "m22", "archetype": "蛮兽", "pos": Vector2(1616.0, 368.0),  "ring": 3},
+	{"id": "m23", "archetype": "智谋", "pos": Vector2(2448.0, 2832.0), "ring": 3},
+	{"id": "m24", "archetype": "猛兽", "pos": Vector2(912.0, 2832.0),  "ring": 3},
+	{"id": "m25", "archetype": "蛮兽", "pos": Vector2(3280.0, 368.0),  "ring": 3},
+	{"id": "m26", "archetype": "智谋", "pos": Vector2(1968.0, 2800.0), "ring": 3},
+	{"id": "m27", "archetype": "猛兽", "pos": Vector2(368.0, 368.0),   "ring": 3},
+	{"id": "m28", "archetype": "蛮兽", "pos": Vector2(496.0, 752.0),   "ring": 3},
+	{"id": "m29", "archetype": "智谋", "pos": Vector2(368.0, 1136.0),  "ring": 3},
+	{"id": "m30", "archetype": "猛兽", "pos": Vector2(3152.0, 2256.0), "ring": 3},
+	{"id": "m31", "archetype": "蛮兽", "pos": Vector2(1552.0, 2768.0), "ring": 3},
+	{"id": "m32", "archetype": "智谋", "pos": Vector2(3120.0, 2832.0), "ring": 3},
+	{"id": "m33", "archetype": "蛮兽", "pos": Vector2(112.0, 2384.0),  "ring": 4},
+	{"id": "m34", "archetype": "蛮兽", "pos": Vector2(1616.0, 112.0),  "ring": 4},
+	{"id": "m35", "archetype": "智谋", "pos": Vector2(1072.0, 144.0),  "ring": 4},
+	{"id": "m36", "archetype": "蛮兽", "pos": Vector2(240.0, 2736.0),  "ring": 4},
+	{"id": "m37", "archetype": "蛮兽", "pos": Vector2(1136.0, 2896.0), "ring": 4},
+	{"id": "m38", "archetype": "智谋", "pos": Vector2(2096.0, 2960.0), "ring": 4},
+	{"id": "m39", "archetype": "蛮兽", "pos": Vector2(176.0, 912.0),   "ring": 4},
+	{"id": "m40", "archetype": "蛮兽", "pos": Vector2(2352.0, 144.0),  "ring": 4},
+	{"id": "m41", "archetype": "智谋", "pos": Vector2(2672.0, 176.0),  "ring": 4},
+	{"id": "m42", "archetype": "蛮兽", "pos": Vector2(3472.0, 2512.0), "ring": 4},
+	{"id": "m43", "archetype": "蛮兽", "pos": Vector2(208.0, 1328.0),  "ring": 4},
+	{"id": "m44", "archetype": "智谋", "pos": Vector2(240.0, 2256.0),  "ring": 4},
+	{"id": "m45", "archetype": "蛮兽", "pos": Vector2(3376.0, 1360.0), "ring": 4},
+	{"id": "m46", "archetype": "蛮兽", "pos": Vector2(3376.0, 2352.0), "ring": 4},
+	{"id": "m47", "archetype": "智谋", "pos": Vector2(176.0, 1648.0),  "ring": 4},
+	{"id": "m48", "archetype": "蛮兽", "pos": Vector2(2864.0, 2928.0), "ring": 4},
+	{"id": "m49", "archetype": "蛮兽", "pos": Vector2(400.0, 2960.0),  "ring": 4},
+	{"id": "m50", "archetype": "猛兽", "pos": Vector2(2552.0, 976.0),  "ring": 1},
+	{"id": "m51", "archetype": "智谋", "pos": Vector2(2540.0, 2083.0), "ring": 1},
+	{"id": "m52", "archetype": "猛兽", "pos": Vector2(980.0, 1012.0),  "ring": 1},
+	{"id": "m53", "archetype": "智谋", "pos": Vector2(1624.0, 2064.0), "ring": 1},
+	{"id": "m54", "archetype": "猛兽", "pos": Vector2(2392.0, 592.0),  "ring": 2},
+	{"id": "m55", "archetype": "智谋", "pos": Vector2(820.0, 1964.0),  "ring": 2},
+	{"id": "m56", "archetype": "蛮兽", "pos": Vector2(2808.0, 2608.0), "ring": 2},
+	{"id": "m57", "archetype": "智谋", "pos": Vector2(981.0, 307.0),   "ring": 3},
+	{"id": "m58", "archetype": "蛮兽", "pos": Vector2(1899.0, 211.0),  "ring": 4},
+	{"id": "m59", "archetype": "蛮兽", "pos": Vector2(696.0, 112.0),   "ring": 4},
+	{"id": "m60", "archetype": "智谋", "pos": Vector2(3341.0, 1579.0), "ring": 4},
+	{"id": "m61", "archetype": "蛮兽", "pos": Vector2(3508.0, 989.0),  "ring": 4},
+	{"id": "m62", "archetype": "蛮兽", "pos": Vector2(312.0, 112.0),   "ring": 4},
+
+	## ---- ⭐⭐ 传承印出处 5 条（**唯一出处，不许删**）----
+	##    这 5 只身上各带一枚印，打死才有强夺的机会 —— 删掉任何一条，那枚印就**永远拿不到**。
+	##    ⚠️ M31.4 表重建时它们是**整体迁移**过来的（`carries` / `elite` 原样保留），
+	##    另外 8 条旧记录（e01…e06 / e10 / e11）已作废删除。
+	##    ⚠️ e02 原在 (2940,640) —— 实测那一格 **B=255 是深水**，Dijkstra 走不到，
+	##       敌人刷在水里玩家永远打不到。它不带印，随整表作废一起删除（不单独挪）。
+	# ⭐ 三名灵师各带一枚印。
+	{"id": "e07", "archetype": "灵师", "pos": Vector2(868.0, 640.0),    "ring": 2, "carries": "流风印"},
+	## ⚠️ 坐标更正（M31.4 架构侧复核）：(3052,896) → **(1776,688)**。
+	##    原坐标落在格 (95,28)，**B=255 深水**，Dijkstra 走不到 ⇒ 而辉光印将来要升 rank 3，
+	##    一枚走不到的印 + 一个高品阶 = 玩家永远拿不到。新点 L2，实测可达。
+	{"id": "e08", "archetype": "灵师", "pos": Vector2(1776.0, 688.0),   "ring": 2, "carries": "辉光印"},
+	{"id": "e09", "archetype": "灵师", "pos": Vector2(2772.0, 2261.3),  "ring": 2, "carries": "云雨印"},
+	## ⚠️ 坐标更正（M31.4 架构侧复核）：(3184,1232) → **(3120,1072)**。
+	##    ⭐⭐ 实测层归属是 **L3 不是 L4**（ρ = 1328/1792 = **0.7411**，落在 0.71~0.86 之间）。
+	##    ⚠️ 我第一版把它标成 L4 是**错的**：验算脚本里那 5 条还是**旧坐标**（e12 旧 = (3388,362.7)，
+	##       ρ=0.8906 才是 L4）。⇒ 新坐标按实测改标 **L3**，别照抄我上一版报告里的 L4。
+	##    ⚠️ 连带后果：原来的设计意图是「精英摆在**离锚点最远的两个角落**（越远越硬）」，
+	##       更正后的两只都在 L3，这条梯度**被削弱了**。要不要把它们挪回 L4 由 team-lead 定 ——
+	##       我没有擅自再挪坐标（那是架构侧复核过的数）。
+	##    实测：格 (97,33) R=50 G=89 **B=0**（草地，非深水、干地），可达。
+	{"id": "e12", "archetype": "智谋", "pos": Vector2(3120.0, 1072.0),  "ring": 3, "carries": "惊雷印", "elite": true},
+	## ⚠️ 坐标更正（M31.4 架构侧复核）：(1360,2800) → **(400,2704)**。
+	##    ⭐⭐ 同样实测为 **L3**（ρ = max(1392/1792, 1168/1536) = max(0.7768, 0.7604) = **0.7768**）。
+	##    实测：格 (12,84) R=150 G=166 **B=0**（灵岩，非深水、干地），可达。
+	{"id": "e13", "archetype": "蛮兽", "pos": Vector2(400.0, 2704.0),   "ring": 3, "carries": "磐石印", "elite": true},
 ]
 
 

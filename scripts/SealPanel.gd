@@ -31,6 +31,8 @@ var selected_slot := -1  # 若它在活跃槽里，槽位下标；否则 -1
 
 var _font: Font = null
 var _msg := ""
+## 炼化按钮下面那句「封印告知」这一帧有没有画（画了就把 _msg 往下让一行）。
+var _gate_shown := false
 ## ⭐ 打开面板的**那一帧**不接受操作。
 ##    实测：按 E 开交易面板，会顺手把第一件商品买下来 ——
 ##    因为「开面板」和「面板处理按键」看到的是**同一个事件**。
@@ -140,6 +142,21 @@ func do_breakthrough() -> bool:
 	var ok: bool = game.try_breakthrough()
 	if ok:
 		_msg = "突破！境界 → %s" % player.realm_name()
+		# ⭐ 解封兑现：提前养的那枚印在这一刻真的能用了 —— 这一声必须响。
+		#    它是「炼气期开始养一枚金丹才醒的印」这条长线投资的兑现点（见 Player.just_unsealed）。
+		var freed: Array = player.just_unsealed
+		if not freed.is_empty():
+			## ⚠️ `Array` **没有** `join()`（Godot 4 里 `join()` 只属于 `PackedStringArray`；
+			##    String 侧的写法是 `"、".join(数组)`）。写反了是**解析错误**，
+			##    会让本脚本整个加载失败 ⇒ `Main.tscn` 里这个节点退化成裸 `Control`
+			##    ⇒ `Game._ready()` 取 `seal_panel.closed` 时炸，整机自检直接挂死。
+			_msg = "%s 解封 —— 境界已够，可用了" % "、".join(freed)
+			# ⚠️ 命窍面板盖住了 HUD，所以这一句**同时**写进面板和 HUD 的提示条：
+			#    面板里当场看得见，关掉面板之后还在。
+			var hud_node = game.hud          # 不写类型：绕开 Control 上没有 notice() 的静态检查
+			if hud_node != null and hud_node.has_method("notice"):
+				hud_node.notice(_msg, 4.5)
+		player.just_unsealed = []
 	queue_redraw()
 	return ok
 
@@ -447,9 +464,11 @@ func _draw() -> void:
 
 	# ---- 炼化按钮（炼的是背包里选中的那枚）----
 	_draw_refine_button()
+	# ⭐ 封印告知**常驻**在炼化按钮下面：投灵力之前就得知道这枚印现在炼满也用不了
+	_gate_shown = _draw_refine_gate_note(current_seal())
 
 	if _msg != "":
-		_text(_msg, Vector2(786.0, 706.0), Color(0.88, 0.92, 0.72), 14)
+		_text(_msg, Vector2(786.0, 726.0 if _gate_shown else 706.0), Color(0.88, 0.92, 0.72), 14)
 	dbg_mark = "done"
 	dbg_frames += 1
 ## 空窍：一颗球。⭐ 半径 = 灵力**容量**；球里的"丰盈程度" = 当前灵力 / 容量。
@@ -743,8 +762,16 @@ func _draw_bag() -> void:
 						Color(0.92, 0.88, 0.60, 0.12))
 			var d: Dictionary = GameData.SEALS[nk]
 			_draw_shape(Vector2(r.position.x + 28.0, y - 6.0), 9.0, str(d.get("shape", "hex")), d["color"], 0.0)
-			_text("%s   %s   炼化 %d%%   未融合（不能用）" % [nk, GameData.RANKS[int(d["rank"])],
-					int(player.refine_of(nk))], Vector2(r.position.x + 48.0, y), Color(0.88, 0.82, 0.76), 14)
+			# ⭐ 被封印的印：条目名**灰化**，名字右侧跟一小行「封印 · 金丹」——
+			#    翻背包的时候不用猜哪一枚现在动不了。
+			var gate_txt := str(player.seal_gate_text(nk))
+			var row_txt := "%s   %s   炼化 %d%%   未融合（不能用）" % [nk,
+					GameData.RANKS[int(d["rank"])], int(player.refine_of(nk))]
+			_text(row_txt, Vector2(r.position.x + 48.0, y),
+					Color(0.88, 0.82, 0.76) if gate_txt == "" else Color(0.56, 0.54, 0.58), 14)
+			if gate_txt != "":
+				_text(gate_txt, Vector2(r.position.x + 56.0 + _text_width(row_txt, 14), y),
+						Color(0.94, 0.70, 0.62), 11)
 		else:
 			var mname := str(e["name"])
 			# ⭐ M30.5b：材料行画图标（没图就还是那个 ◆）
@@ -777,6 +804,22 @@ func _draw_refine_button() -> void:
 			int(GameData.REFINE["press_cost"]), int(GameData.REFINE["press_gain"])],
 			rb.position + Vector2(16.0, 30.0),
 			Color(0.88, 0.95, 1.0) if ref_ok else Color(0.48, 0.52, 0.56), 15)
+
+
+## ⭐ 炼化按钮旁**常驻**的封印告知。
+## 为什么必须常驻、而不是炼满了才说：炼满一枚印 = 13 次 × 10 灵力 = 130 灵力，
+## 而炼气期满管才 100 —— 玩家要跨 1.3 管灵力才听到一句「封印」，那不是养成，是被骗。
+## ⚠️ 文案跟着 `Player.seal_gate_of()` 走（它只查 GameData.REALMS），改境界表不用改界面。
+func _draw_refine_gate_note(nk: String) -> bool:
+	if nk == "" or player == null or not player.has_method("seal_gate_of"):
+		return false
+	var gate := str(player.seal_gate_of(nk))
+	if gate == "":
+		return false
+	var rb := refine_rect()
+	_text("此印品阶太高：炼满后仍需 %s 才能动用。现在炼，是提前养它。" % gate,
+			rb.position + Vector2(16.0, rb.size.y + 20.0), Color(0.96, 0.76, 0.54), 13)
+	return true
 func _passive_text(d: Dictionary) -> String:
 	var kind := str(d["passive"])
 	var v := float(d.get("passive_value", 1.0))
@@ -807,6 +850,13 @@ func _base_text(b: Dictionary) -> String:
 		"move_speed":
 			return "移速 +%d（永久）" % int(v)
 	return stat
+
+
+## 一行字有多宽 —— 用来把「封印 · 金丹」摆在条目名**右边**（不写死偏移量）。
+func _text_width(s: String, px: int) -> float:
+	if _font == null:
+		return float(s.length()) * float(px) * 0.6      # 没字体时的兜底估算
+	return _font.get_string_size(s, HORIZONTAL_ALIGNMENT_LEFT, -1, px).x
 
 
 func _text(s: String, at: Vector2, col: Color, px: int) -> void:

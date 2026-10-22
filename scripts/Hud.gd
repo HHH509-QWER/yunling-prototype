@@ -128,18 +128,22 @@ func _draw() -> void:
 	else:
 		# ⭐ 文案跟着数据走 —— 改 autosave_sec 不用再来改界面
 		var auto_secs := float(GameData.ANCHOR["autosave_sec"])
-		var auto_note := "每 %d 秒自动存档" % int(auto_secs)
-		if auto_secs >= 60.0:
-			auto_note = "每 %d 分钟自动存档" % int(round(auto_secs / 60.0))
-		_text(auto_note, Vector2(size.x * 0.5 - 56.0, size.y - 124.0),
-				Color(0.62, 0.66, 0.72), 14)
+		## ⚠️ M33：`0` = 自动存档**关闭**（用户定案）。这时**什么都不显示** ——
+		##    写「每 0 秒自动存档」是句假话，写「已关闭」又是在屏幕上挂一条常驻说明。
+		##    界面不撒谎的方式只有一种：没有这回事，就不画它。
+		if auto_secs > 0.0:
+			var auto_note := "每 %d 秒自动存档" % int(auto_secs)
+			if auto_secs >= 60.0:
+				auto_note = "每 %d 分钟自动存档" % int(round(auto_secs / 60.0))
+			_text(auto_note, Vector2(size.x * 0.5 - 56.0, size.y - 124.0),
+					Color(0.62, 0.66, 0.72), 14)
 
 	# ---- 物品（M8）----
 	_draw_bag(p)
 
 	# 刚捡到东西的提示
 	if str(game.pickup_toast) != "":
-		_text(str(game.pickup_toast), Vector2(size.x * 0.5 - 52.0, size.y - 158.0),
+		_text(_pickup_toast_text(str(game.pickup_toast), p), Vector2(size.x * 0.5 - 52.0, size.y - 158.0),
 				Color(0.86, 0.90, 0.70), 15)
 	if bool(game.bag_full_hint):
 		var why := "这一枚你已经有了" if bool(game.seize_dup_hint) else "背包已满 —— 东西留在地上"
@@ -248,6 +252,28 @@ func _bar(r: Rect2, ratio: float, col: Color) -> void:
 func _text(s: String, at: Vector2, col: Color = Color(0.90, 0.88, 0.84), px: int = 14) -> void:
 	if _font != null:
 		draw_string(_font, at, s, HORIZONTAL_ALIGNMENT_LEFT, -1, px, col)
+
+
+## ⭐ 拾取提示：**拿到一枚被封印的印，当场就说清它现在用不了**。
+##    Game 只给得出「获得 玄甲印」这个骨架（那两行在 Game.gd 里，本轮不动它），
+##    所以封印附注在 HUD 这一层补上 —— 文案跟着 GameData.REALMS 走，改境界表不用改界面。
+## ⚠️ 认印不用正则、也不假设文案格式：印名是一张封闭表，直接看提示里有没有它。
+func _pickup_toast_text(raw: String, p) -> String:
+	if p == null or not p.has_method("seal_gate_of"):
+		return raw
+	var nk := ""
+	for k in GameData.SEALS.keys():
+		if str(k) != "" and raw.contains(str(k)):
+			nk = str(k)
+			break
+	if nk == "":
+		return raw
+	var gate := str(p.seal_gate_of(nk))
+	if gate == "":
+		return raw
+	# 「命窍满了先放背包」这条信息不能因为加了封印附注就丢掉
+	var to_bag := raw.contains("背包")
+	return "获得 %s（%s封印 · 需 %s 才能解封）" % [nk, "先放背包 · " if to_bag else "", gate]
 
 
 ## 提示条画在最上层（最后调）。

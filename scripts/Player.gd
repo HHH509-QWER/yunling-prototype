@@ -23,6 +23,11 @@ var cultivation := 0.0        # ⭐ 灵力上限会被炼化满的基础属性�
 ## ⚠️ 和「灵印十等」完全是两码事：十等是印的阶级（§二），境界是**灵师本人**的修为。
 var realm := 1
 
+## ⭐ 上一次突破**当场解封**的印名（命窍面板读了就清，见 SealPanel.do_breakthrough()）。
+##    为什么是字段不是返回值：`breakthrough()` 已经被十几处当 bool 用，改签名要牵一片；
+##    而「哪些印解封了」是一次性的表现层事件，谁先读到谁播。
+var just_unsealed: Array = []
+
 ## 炼化度：印名 -> 0..100。⭐ 炼化挂在**印**上，不挂在槽位上 —— 换槽位不该丢炼化。
 ## ⚠️ V0.1 限制：同一枚印只有一份炼化度（同名共用）。等合炼/强夺会产出同名印了再拆成实例。
 var seal_refine: Dictionary = {}
@@ -68,6 +73,17 @@ var _anim_t := 0.0
 ##    facing = 鼠标（判定/瞄准用，一直是它）；body_dir = **走动时取移动方向、停下时取鼠标**。
 ##    为什么必须分开：4 向走路动画若跟鼠标，就会出现「人朝上、脚往右挪」——走起来是错的。
 var body_dir := Vector2.DOWN
+## ⭐ M34：**扇区是有记忆的**。以前每次画图都拿 `body_dir` 现算
+##    （`ax > ay*2` 那套阈值），鼠标压在扇区边界上抖 0.1° 就会每帧换一张图，
+##    看着像抽帧。现在改成「存一个扇区，偏离**当前扇区中心**够远才换」。
+##    index 跟着 DIR_SUFFIX 走：0 = 正右，顺时针一圈（和 Vector2.angle() 同向）。
+const DIR_SUFFIX := ["_r", "_dr", "_d", "_dl", "_l", "_ul", "_u", "_ur"]
+## 死区 = 扇区宽的 62%（约 28°）。小于它不换，大于它才换 —— 边界附近才稳。
+const DIR_HYST := 0.62
+var _dir_sector := 2                 # 2 = 朝下（Vector2.DOWN）
+## 站定转身的**平滑速率**（每秒）。`1 - exp(-k*dt)` 与帧率无关：
+## 固定步长 lerp 在高/低帧率下转得一样快，看起来就不一样快。
+const TURN_RATE := 14.0
 ## 走路帧的**固定帧率**累加器。⚠️ 以前帧索引直接由 `_walk_phase` 取整，
 ## 相位推进一快就会 0→2→3 跳着走（这就是「感觉不流畅」的来源之一）。
 const WALK_ANIM_FPS := 9.0
@@ -161,7 +177,13 @@ func _process(delta: float) -> void:
 	## ⭐ M30.18：**停下时跟随鼠标**（走动的方向在 _move 里存）—— 两个需求都满足：
 	##    走起来像鬼谷八荒（朝移动方向），站住会转向你鼠标（瞄准/施法直观）。
 	if _walk_blend <= 0.15:
-		body_dir = facing
+		## ⭐ M34：**缓着转**，不是直接赋值 —— 直接赋值是「翻页」，缓过去才是「转身」。
+		##    用角度插值而不是 Vector2.slerp：180° 对向时 slerp 会退化，lerp_angle 不会。
+		var want_a := facing.angle()
+		var turned := lerp_angle(body_dir.angle(), want_a, 1.0 - exp(-TURN_RATE * delta))
+		body_dir = Vector2.from_angle(turned)
+	## ⭐ M34：扇区只跟 `body_dir`（真正画出来的方向）走，而且带死区 —— 见 _update_dir_sector。
+	_update_dir_sector(body_dir.angle())
 	## ⭐ M30.18：走路帧按**固定帧率**推进（治跳帧）；停住归零，下次起步从第一帧开始。
 	if _walk_blend > 0.15:
 		_walk_anim_t += delta * WALK_ANIM_FPS
@@ -204,23 +226,24 @@ func _tick_anim(delta: float) -> void:
 		_anim_t = 0.0
 
 
+## ⭐ M34：角度 → 八方向扇区，**带死区**。
+##    没有这一层：鼠标压在 45° 边界上抖 0.1°，人物就每帧换一张图（看着像抽帧）。
+##    有这一层：要**偏离当前扇区中心 62% 扇区宽**（约 28°）才换，边界附近是稳的。
+##    ⚠️ 越过死区时**直接取最近的扇区**，不按格步进 —— 180° 甩鼠标不该分四帧转过去。
+func _update_dir_sector(a: float) -> void:
+	var center := float(_dir_sector) * (TAU / 8.0)
+	if absf(angle_difference(a, center)) <= (TAU / 8.0) * DIR_HYST:
+		return
+	_dir_sector = int(roundf(fposmod(a, TAU) / (TAU / 8.0))) % 8
+
+
 ## ⭐ M30.18：`body_dir` → 走路动作名后缀。八方向归成三套画：
 ##    朝上（背面 `_u`）/ 朝下（正面 `_d`）/ 朝侧面（`_s`，左右用镜像）。
 ##    ⚠️ 缺哪套回退到 `walk` —— 一套图也能跑，出齐一套生效一套。
+##    ⭐ M34：扇区不再现算，改用 `_dir_sector`（带死区的状态，见 _update_dir_sector）。
 func _walk_anim_name(d: Dictionary) -> String:
 	var anims: Dictionary = (d["visual"] as Dictionary).get("anims", {})
-	## 八方向 → 后缀（按角度归到 8 个扇区）
-	var ax := absf(body_dir.x)
-	var ay := absf(body_dir.y)
-	var suffix := "_d"
-	if ay > ax * 2.0:
-		suffix = "_u" if body_dir.y < 0.0 else "_d"
-	elif ax > ay * 2.0:
-		suffix = "_l" if body_dir.x < 0.0 else "_r"
-	elif body_dir.y < 0.0:
-		suffix = "_ul" if body_dir.x < 0.0 else "_ur"
-	else:
-		suffix = "_dl" if body_dir.x < 0.0 else "_dr"
+	var suffix: String = DIR_SUFFIX[_dir_sector]
 	## ⭐ 回退链：精确 → 主方向 → 侧面 → 无后缀（缺哪套都能跑）
 	var chain: Array = ["walk" + suffix]
 	if suffix == "_dl": chain.append_array(["walk_d", "walk_l"])
@@ -325,7 +348,9 @@ func _clamp_world() -> void:
 ## 减去自己的位置，就得到一个「从我指向鼠标」的向量。
 func _face_mouse() -> void:
 	var to_mouse: Vector2 = get_global_mouse_position() - position
-	if to_mouse.length() > 1.0:      # 太近就不更新，避免抖动
+	## ⚠️ 死区要按**屏幕像素**想：相机 zoom = 2，1 世界像素 = 2 屏幕像素。
+	##    旧值 1.0 只有 2 屏幕像素 —— 鼠标贴着人时朝向会乱跳。6.0 ≈ 12 屏幕像素。
+	if to_mouse.length() > 6.0:
 		facing = to_mouse.normalized()
 
 
@@ -357,7 +382,10 @@ func _attack_input(delta: float) -> void:
 	play_anim("attack")               # 出手动作（帧还没画，会安静忽略）
 	if game == null:
 		return
-	game.spawn_swing(attack_center(), facing)     # 掌风弧光：先出来（表现层）
+	## ⭐ M33：前摇的提示从「掌风弧光」换成**手心聚气** —— 和「一道气走直线」同一套语言。
+	##    位置是**手心**（身前 14px），不是攻击线中心（身前 108px）——
+	##    拿 `attack_center()` 会画成"气在两百米外凭空聚起来"。
+	game.spawn_swing(position + facing * float(GameData.ATTACK["qi"]["hand"]), facing)
 	queue_redraw()
 
 
@@ -371,6 +399,21 @@ func _strike() -> void:
 			float(GameData.attack_of(realm)["damage"]) + attack_damage_bonus())
 
 
+## ⭐ M34：**朝向锚点** —— 身体只有 4 张图，「现在在瞄哪边」靠这个自由角度的小东西说。
+##    它不采样贴图（纯 draw_circle / draw_arc），所以转多少度都不会糊；
+##    这是撤掉那条 16px 朝向线（M33b）之后，视觉上唯一还在做「指向鼠标」的东西。
+##    位置 = `facing * 17`（绕身一圈）+ 固定的胸口抬高 —— 所以它永远落在鼠标那一侧。
+func _draw_aim_anchor(bob: float) -> void:
+	var hand := facing * 17.0 + Vector2(0.0, bob - 8.0)
+	var a := facing.angle()
+	## 抬手 / 出掌时点亮；平时只是低调的余光，不抢立绘
+	var hot := _windup_left > 0.0 or _anim == "attack"
+	var col := Color(0.72, 0.95, 1.0, 0.90 if hot else 0.55)
+	draw_circle(hand, 4.0 if hot else 3.0, col)
+	draw_arc(hand, 7.5 if hot else 6.0, a - 0.55, a + 0.55, 12,
+			Color(col.r, col.g, col.b, col.a * 0.55), 1.5)
+
+
 func _draw() -> void:
 	var r := float(GameData.PLAYER["radius"])
 	# ⭐ 走路的上下起伏跟**步频**走（一个循环两次）；站定时 _walk_blend 缓到 0，身体不再空飘。
@@ -381,11 +424,12 @@ func _draw() -> void:
 	#    频率用 _bob（每秒 6 的计时器）× 2.0 ≈ 1.9Hz —— 比人心跳快、比呼吸略快，看着才不呆。
 	bob += sin(_bob * 2.0) * 1.2 * (1.0 - _walk_blend)
 
-	# 朝向线：让「鼠标指着哪」一眼可见。没有它，这个原型就分不清朝向。
-	draw_line(facing * r * 0.6, facing * (r + 16.0), Color(1.0, 0.82, 0.35, 0.9), 2.5)
+	# ⭐ M33b：**朝向线已删除**（用户要求）。
+	#    以前这里 draw_line 画一条 16px 的黄色短线指向鼠标，作用是"分不清朝向"时的原型提示。
+	#    现在四向走路图自己就能读出朝向，那条线反而挂角色旁边碍眼 —— 撤掉。
+	#    ⚠️ `facing` 本身**保留**：出手方向、气劲判定仍然靠它，只是不再画出来。
 
 	# ⭐ 有贴图就画贴图（影子/身体/描边/眼睛都在图里），没有就走色块 —— 见 ActorVisual.gd
-	#    朝向线留在外面：它是「鼠标指哪」的功能提示，不算形象设计。
 	var tex := _anim_texture()
 	## ⭐ M30.21：**落地影** —— HD 立绘里**没有**投影（出图时我要求去掉的，因为 AI 画的影子方向/长短不可控），
 	##    所以影子必须在游戏里画：压扁的椭圆叠两层（外柔内实），只有"人在光下"这一条信息。
@@ -420,6 +464,12 @@ func _draw() -> void:
 
 		# 面朝方向的小暗点，像一只眼睛，让朝向更明显
 		draw_circle(Vector2(0.0, bob) + facing * (r * 0.5), 3.0, Color(0.18, 0.20, 0.26))
+
+	# ⭐ M34：朝向锚点 —— 贴图 / 色块两条分支**都要**。
+	#    色块那边虽然已经有「眼睛」，但那只在身体圈内、贴图分支完全没有；统一画一个绕身的，
+	#    换美术前后朝向的可读性才一致。
+	if not _dead:
+		_draw_aim_anchor(bob)
 
 	# ---- 灵印贴附在身上的部位表现（显化中才有）----
 	# ⭐ 挨打的那一枚会闪红：玩家不用盯血条，看身体哪个部位在闪就知道谁在挨打
@@ -725,13 +775,20 @@ func cultivate() -> float:
 
 
 ## 突破：修为灌进去，境界 +1，气血 / 灵力上限 / 移速 / 命窍容量一起涨。
+## ⭐ 顺手记下「这一帧有哪些印解封了」—— 提前养的那枚印在这一刻兑现，
+##    这是整条长线投资的兑现点，界面必须报一声（见 `just_unsealed`）。
 func breakthrough() -> bool:
 	if not can_breakthrough():
 		return false
+	var sealed_before: Array = sealed_owned()
 	realm += 1
 	cultivation = 0.0
 	refill()                               # 突破后气血与灵力回满（新境界的上限）
 	hp = hp_max
+	just_unsealed = []
+	for nk in sealed_before:
+		if not is_sealed(str(nk)):
+			just_unsealed.append(str(nk))
 	queue_redraw()
 	return true
 
@@ -760,14 +817,72 @@ func is_sealed(name_key: String) -> bool:
 	return is_sealed_rank(int(GameData.SEALS[name_key]["rank"]))
 
 
+## ⭐ 纯查表：这个**品阶**要哪个境界才解得开封印（返回境界名；"" = 无封印）。
+##    · rank 1 / 2 → ""（炼气就能驾驭）
+##    · rank 3 → 金丹　rank 4 → 元婴　rank 5 → 化神
+## ⚠️ 只查 GameData.REALMS 的 `seal_rank_max`，**不看当前境界** ⇒ 它是纯函数，能直接断言
+##    （tests/seal_gate_test.gd）。这也是它和 `is_sealed()` 的分工：一个说「要几重」，
+##    一个说「我现在够不够」。
+func seal_gate_realm_name(rank: int) -> String:
+	var keys: Array = GameData.REALMS.keys()
+	keys.sort()
+	for i in range(keys.size()):
+		var k: int = int(keys[i])
+		if rank <= int(GameData.REALMS[k].get("seal_rank_max", 10)):
+			return "" if i == 0 else str(GameData.REALMS[k]["name"])
+	return ""
+
+
+## 这枚印的**封印门槛**："" = 没封印；否则 "金丹" / "元婴" / "化神"。
+## ⭐ 它也**不看当前境界** —— 「这枚印要几重」是印自己的属性，和玩家现在几重无关。
+func seal_gate_of(name_key: String) -> String:
+	if name_key == "" or not GameData.SEALS.has(name_key):
+		return ""
+	return seal_gate_realm_name(int(GameData.SEALS[name_key]["rank"]))
+
+
+## 界面上那一小段小字："" 或 "封印 · 金丹"。
+## ⭐ 三处界面（拾取提示 / 背包条目 / 炼化按钮）全问这一个函数 —— 文案不会各写一套。
+func seal_gate_text(name_key: String) -> String:
+	var g := seal_gate_of(name_key)
+	return "" if g == "" else "封印 · %s" % g
+
+
+## 我手上**正被封印**的印（活跃 + 备用 + 背包，去重）。
+func sealed_owned() -> Array:
+	var out: Array = []
+	for nk in owned_seal_names():
+		if is_sealed(str(nk)) and not out.has(str(nk)):
+			out.append(str(nk))
+	return out
+
+
+## 我手上的印名（活跃 + 备用 + 背包，去重，按这个顺序）。
+func owned_seal_names() -> Array:
+	var out: Array = []
+	for i in range(slot_seal.size()):
+		var nk := str(slot_seal[i])
+		if nk != "" and not out.has(nk):
+			out.append(nk)
+	for n in reserve_seals:
+		if not out.has(str(n)):
+			out.append(str(n))
+	for n in bag_seals:
+		if not out.has(str(n)):
+			out.append(str(n))
+	return out
+
+
 ## ⭐ **唯一的门槛入口**：能不能用这枚印（显化 / 被动 / 基础属性都问它）。
 func can_use(name_key: String) -> Dictionary:
 	if name_key == "":
 		return {"ok": false, "reason": "空槽位"}
 	if not is_refined(name_key):
 		return {"ok": false, "reason": "未融合（炼化 %.0f%%）" % refine_of(name_key)}
+	# ⚠️ 门槛本身只看 `is_sealed()`（**当前境界**够不够）；`seal_gate_of()` 只负责把
+	#    「要几重」写进理由 —— 「需更高境界」是一句正确的废话，玩家算不出还差多远。
 	if is_sealed(name_key):
-		return {"ok": false, "reason": "封印（需更高境界）"}
+		return {"ok": false, "reason": "封印 · 需 %s 才能解封" % seal_gate_of(name_key)}
 	return {"ok": true, "reason": ""}
 
 
