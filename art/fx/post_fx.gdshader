@@ -6,8 +6,11 @@ shader_type canvas_item;
 uniform sampler2D screen_tex : hint_screen_texture, filter_linear;
 uniform float glow_strength : hint_range(0.0, 1.0) = 0.30;
 uniform float threshold : hint_range(0.0, 1.0) = 0.72;
-uniform float grade_strength : hint_range(0.0, 0.5) = 0.16;
-uniform float vignette_strength : hint_range(0.0, 1.0) = 0.40;
+// ⭐ M33：分级 0.16 → 0.12（分级本身会把暗部再压一档，和「提亮」互相抵消）
+uniform float grade_strength : hint_range(0.0, 0.5) = 0.12;
+// ⭐ M33：暗角 0.40 → 0.14。0.40 在俯视角下把四角压掉近一半亮度，
+//    而俯视角的乐趣恰恰是「看得见远处」——暗角该收边，不该遮视野。
+uniform float vignette_strength : hint_range(0.0, 1.0) = 0.14;
 
 void fragment() {
 	vec2 uv = SCREEN_UV;

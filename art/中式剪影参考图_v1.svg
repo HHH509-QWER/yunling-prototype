@@ -1,0 +1,170 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1180 940" width="1180" height="940" font-family="system-ui, 'Microsoft YaHei', sans-serif">
+<rect width="1180" height="940" fill="#f5f3ee"/>
+<text x="40" y="38" font-size="21" font-weight="700" fill="#23262e">中式剪影 · 参考图 v1.2</text>
+<text x="40" y="60" font-size="13" fill="#6a6f78">配套《可执行规格 v2》参数表 · 纯剪影（只有轮廓，无描边无渐变）· 单位：世界单位（1 格 = 32）</text>
+
+<!-- ============ A 主城平面 ============ -->
+<rect x="40" y="80" width="380" height="390" fill="#ffffff" stroke="#c9c5bc"/>
+<text x="52" y="102" font-size="14" font-weight="700" fill="#23262e">A · 仙缘城 平面（序列：南门 → 街 → 广场 → 塔）</text>
+<rect x="60" y="118" width="350" height="350" fill="#eceae4" stroke="#b5b0a6" stroke-dasharray="4 3"/>
+<text x="66" y="136" font-size="11" fill="#8a8579">平台 1024×1024 · 格 40~71 × 32~63 · 中心格 (56,48)</text>
+<text x="66" y="150" font-size="10" fill="#3f7a5a">= 出生点平坝（±16 格，右开 ⇒ 32 格）⇒ 零向南级差 ⇒ 零暗缝</text>
+
+<!-- 广场 -->
+<rect x="196.7" y="287.5" width="87.5" height="87.5" fill="#d9d5cc" stroke="#a8a399"/>
+<!-- 街 -->
+<rect x="218.6" y="375.0" width="43.7" height="87.5" fill="#cfcbc1" stroke="#a8a399"/>
+<!-- 塔基 -->
+<rect x="224.1" y="260.9" width="32.8" height="32.8" fill="#23262e"/>
+<!-- 牌坊 -->
+<rect x="224.1" y="459.5" width="32.8" height="6" fill="#23262e"/>
+<!-- 幡阵 12 根 -->
+<g fill="#b84c46">
+<circle cx="196.7" cy="287.5" r="3"/><circle cx="240.5" cy="287.5" r="3"/><circle cx="284.2" cy="287.5" r="3"/>
+<circle cx="196.7" cy="331.3" r="3"/><circle cx="284.2" cy="331.3" r="3"/>
+<circle cx="196.7" cy="375.0" r="3"/><circle cx="240.5" cy="375.0" r="3"/><circle cx="284.2" cy="375.0" r="3"/>
+<circle cx="218.6" cy="386" r="3"/><circle cx="262.3" cy="386" r="3"/>
+<circle cx="218.6" cy="424" r="3"/><circle cx="262.3" cy="424" r="3"/>
+</g>
+<!-- 出生点 / 商人 -->
+<circle cx="235.0" cy="293.0" r="4.5" fill="#3f7a5a"/>
+<circle cx="235.0" cy="199.6" r="4.5" fill="#b8862b"/>
+<text x="243" y="290" font-size="10" fill="#3f7a5a">出生点 (1792,1536)</text>
+<text x="243" y="203" font-size="10" fill="#b8862b">商人 (1792,1262.9)</text>
+<text x="260" y="276" font-size="10" fill="#23262e">塔 base (1808,1490)</text>
+<text x="200" y="348" font-size="10" fill="#6a6f78">广场</text>
+<text x="230" y="420" font-size="10" fill="#6a6f78">街</text>
+<text x="258" y="472" font-size="10" fill="#23262e">牌坊 y=2032</text>
+<text x="66" y="462" font-size="11" fill="#6a6f78">南 ↑（y 小 = 北 = 远）；红点 = 幡阵 12 根（成组，不单根）</text>
+
+<!-- ============ B 立面高度 + h_split ============ -->
+<rect x="440" y="80" width="700" height="390" fill="#ffffff" stroke="#c9c5bc"/>
+<text x="452" y="102" font-size="14" font-weight="700" fill="#23262e">B · 立面高度 · h_split = 50（≈ 玩家身高 48）</text>
+<!-- 层级带 -->
+<rect x="460" y="300" width="660" height="100" fill="#e8f0ea"/>
+<rect x="460" y="160" width="660" height="140" fill="#f2e9ea"/>
+<line x1="460" y1="300" x2="1120" y2="300" stroke="#b84c46" stroke-width="2" stroke-dasharray="7 4"/>
+<text x="464" y="294" font-size="11" font-weight="700" fill="#b84c46">h_split = 50 ── 0~50 走 _draw_world()（人身后）｜50 以上走 FgLayer z=64（盖人）</text>
+<text x="464" y="176" font-size="11" fill="#8a6a6a">FgLayer 段（盖人）</text>
+<text x="464" y="392" font-size="11" fill="#4a6a55">世界层段（人身后）</text>
+<line x1="460" y1="400" x2="1120" y2="400" stroke="#23262e" stroke-width="2"/>
+<text x="1124" y="404" font-size="11" fill="#23262e">地面</text>
+
+<!-- 玩家 48 -->
+<rect x="490" y="304" width="26" height="96" fill="#3f7a5a"/>
+<text x="484" y="420" font-size="10" fill="#3f7a5a">玩家 48</text>
+
+<!-- 飞檐 h_eave 48~72 / h_ridge 70~94 -->
+<g>
+<path d="M600,304 Q640,296 680,304 L680,314 Q640,306 600,314 Z" fill="#23262e"/>
+<path d="M600,304 Q640,268 680,304" fill="none" stroke="#23262e" stroke-width="3"/>
+<path d="M600,314 L600,400 M680,314 L680,400" stroke="#a8a399" stroke-width="2" stroke-dasharray="4 3"/>
+<text x="596" y="424" font-size="10" fill="#23262e">飞檐 48~94</text>
+<text x="596" y="438" font-size="9" fill="#6a6f78">≥48 ⇒ 同 y 时天然不压玩家头</text>
+</g>
+
+<!-- 牌坊 柱 88 / 屋顶 110 -->
+<g>
+<rect x="726" y="288" width="7" height="112" fill="#23262e"/>
+<rect x="789" y="288" width="7" height="112" fill="#23262e"/>
+<rect x="726" y="288" width="70" height="9" fill="#23262e"/>
+<path d="M714,288 Q761,268 808,288 L808,296 L714,296 Z" fill="#23262e"/>
+<text x="722" y="424" font-size="10" fill="#23262e">牌坊 88 / 顶 110</text>
+<text x="722" y="438" font-size="9" fill="#6a6f78">横梁下净空 88，走人不碰头</text>
+</g>
+
+<!-- 幡阵 杆 72 / 布 18×54 -->
+<g>
+<rect x="858" y="256" width="4" height="144" fill="#23262e"/>
+<rect x="862" y="256" width="40" height="4" fill="#23262e"/>
+<path d="M872,260 q10,54 2,108 l36,0 q-8,-54 2,-108 z" fill="#b84c46"/>
+<text x="852" y="424" font-size="10" fill="#23262e">幡 杆72 / 布18×54</text>
+<text x="852" y="438" font-size="9" fill="#6a6f78">dx = 7·sin(1.6t+0.7i)</text>
+</g>
+
+<!-- 塔 120 -->
+<g>
+<path d="M940,400 L940,304 L952,304 L952,288 L958,288 L958,272 L964,272 L964,256 L968,256 L968,240 L972,240 L972,224 L976,224 L976,208 L980,208 L980,192 L984,192 L984,176 L988,176 L988,160 L992,160 L996,144 L992,144 L992,160 L988,160 L988,176 L984,176 L984,192 L980,192 L980,208 L976,208 L976,224 L972,224 L972,240 L968,240 L968,256 L964,256 L964,272 L958,272 L958,288 L952,288 L952,304 L940,304 Z" fill="#23262e"/>
+<text x="936" y="424" font-size="10" fill="#23262e">塔 120（2.5×身高）</text>
+<text x="936" y="438" font-size="9" fill="#6a6f78">5 层×20 + 塔刹 20</text>
+</g>
+<text x="1010" y="180" font-size="10" fill="#8a6a6a">塔顶可见条件：py − yb ≤ 192 − H = 72 ✓</text>
+<text x="1010" y="198" font-size="9" fill="#8a6a6a">（H=174 时须 ≤18，站不进去 ⇒ 已砍）</text>
+
+<!-- ============ C 飞檐模块曲线 ============ -->
+<rect x="40" y="490" width="560" height="430" fill="#ffffff" stroke="#c9c5bc"/>
+<text x="52" y="512" font-size="14" font-weight="700" fill="#23262e">C · 飞檐模块 draw_eave() —— 曲线参数（3× 放大）</text>
+<line x1="70" y1="880" x2="570" y2="880" stroke="#23262e" stroke-width="2"/>
+<text x="574" y="884" font-size="11" fill="#23262e">地面</text>
+<!-- 墙 -->
+<rect x="148" y="712" width="192" height="168" fill="#d9d5cc" stroke="#a8a399"/>
+<!-- 屋顶 -->
+<path d="M106,670 Q134,694 148,700 Q196,696 244,634 Q292,696 340,700 Q354,694 382,670 L382,682 Q354,706 340,712 Q292,708 244,648 Q196,708 148,712 Q134,706 106,682 Z" fill="#23262e"/>
+<circle cx="196" cy="696" r="3.5" fill="#b84c46"/>
+<circle cx="292" cy="696" r="3.5" fill="#b84c46"/>
+<text x="150" y="726" font-size="10" fill="#6a6f78">墙（不在剪影内）</text>
+<!-- 标注 -->
+<line x1="106" y1="666" x2="148" y2="666" stroke="#b84c46"/>
+<text x="60" y="662" font-size="10" fill="#b84c46">挑出 14</text>
+<line x1="148" y1="640" x2="244" y2="640" stroke="#b84c46" stroke-dasharray="4 3"/>
+<text x="150" y="634" font-size="10" fill="#b84c46">脊高 h_ridge = h_eave + 22</text>
+<line x1="106" y1="670" x2="106" y2="700" stroke="#3f7a5a"/>
+<text x="60" y="690" font-size="10" fill="#3f7a5a">起翘 10</text>
+<text x="106" y="726" font-size="10" fill="#6a6f78">檐口 h_eave</text>
+<text x="400" y="600" font-size="11" fill="#23262e">屋面控制点下压 6</text>
+<text x="400" y="618" font-size="11" fill="#23262e">= 反宇凹曲面（不是直线坡）</text>
+<text x="400" y="642" font-size="11" fill="#23262e">w = 56 / 64 / 72</text>
+<text x="400" y="660" font-size="11" fill="#23262e">h_eave = 48 / 54 / 60 / 66 / 72</text>
+<text x="400" y="684" font-size="10" fill="#6a6f78">抖动：w = 56+(i·53%3)·8</text>
+<text x="400" y="702" font-size="10" fill="#6a6f78">h_eave = 48+(i·37%5)·6</text>
+<text x="400" y="726" font-size="10" fill="#6a6f78">→ 20 个开间同一函数、只换 (w, h_eave, i)</text>
+<text x="60" y="906" font-size="10" fill="#6a6f78">色 Color(0.16,0.18,0.24,0.92) + 2px 勾边 (0.10,0.12,0.16,0.90)</text>
+
+<!-- ============ D 野外四域：同色不同形 ============ -->
+<rect x="620" y="490" width="520" height="430" fill="#ffffff" stroke="#c9c5bc"/>
+<text x="632" y="512" font-size="14" font-weight="700" fill="#23262e">D · 野外四域「界感」—— 同色不同形（成片，不成点）</text>
+<text x="632" y="532" font-size="11" fill="#b84c46">⭐ 剪影标在「域的边界带」上，不在域内撒 —— 界感字面成立，且数量随周长增长、不随面积增长</text>
+
+<!-- 草海 -->
+<rect x="640" y="548" width="230" height="120" fill="#eceae4" stroke="#c9c5bc"/>
+<path d="M640,606 q36,-18 72,0 t72,0 t86,0 L870,668 L640,668 Z" fill="#23262e"/>
+<path d="M640,648 q30,-12 60,0 t60,0 t50,0 t60,0 L870,668 L640,668 Z" fill="#23262e"/>
+<text x="648" y="562" font-size="11" font-weight="700" fill="#23262e">① 城 → 草海：草浪</text>
+<text x="648" y="580" font-size="9" fill="#6a6f78">两道实心波，远波更高（靠高度分层，不靠半透）</text>
+
+<!-- 疏林 -->
+<rect x="890" y="548" width="230" height="120" fill="#eceae4" stroke="#c9c5bc"/>
+<path d="M890,668 L890,640 l16,-22 l14,18 l10,-26 l12,24 l12,-16 l14,20 l10,-30 l14,26 l12,-14 l16,18 l12,-22 l14,20 l12,-16 l14,22 l10,-18 l16,20 l12,-12 l14,16 L1120,668 Z" fill="#23262e"/>
+<text x="898" y="562" font-size="11" font-weight="700" fill="#23262e">② 草海 → 疏林：林线</text>
+<text x="898" y="580" font-size="9" fill="#6a6f78">一条连续锯齿轮廓</text>
+<text x="898" y="594" font-size="9" fill="#b84c46">⚠ 画林线，不画树</text>
+
+<!-- 碎石坡 -->
+<rect x="640" y="686" width="230" height="120" fill="#eceae4" stroke="#c9c5bc"/>
+<path d="M640,806 L640,724 l26,-36 l18,26 l22,-44 l20,34 l24,-22 l18,30 l26,-38 l22,28 l24,-18 L870,806 Z" fill="#23262e"/>
+<text x="648" y="700" font-size="11" font-weight="700" fill="#23262e">③ 疏林 → 碎石坡：石林</text>
+<text x="648" y="718" font-size="9" fill="#6a6f78">折线硬角，无圆转</text>
+
+<!-- 泥沼 -->
+<rect x="890" y="686" width="230" height="120" fill="#eceae4" stroke="#c9c5bc"/>
+<g fill="#23262e">
+<rect x="898" y="752" width="6" height="54"/><rect x="912" y="766" width="6" height="40"/>
+<rect x="926" y="738" width="6" height="68"/><rect x="940" y="760" width="6" height="46"/>
+<rect x="954" y="746" width="6" height="60"/><rect x="968" y="770" width="6" height="36"/>
+<rect x="982" y="734" width="6" height="72"/><rect x="996" y="756" width="6" height="50"/>
+<rect x="1010" y="742" width="6" height="64"/><rect x="1024" y="764" width="6" height="42"/>
+<rect x="1038" y="748" width="6" height="58"/><rect x="1052" y="768" width="6" height="38"/>
+<rect x="1066" y="736" width="6" height="70"/><rect x="1080" y="754" width="6" height="52"/>
+<rect x="1094" y="744" width="6" height="62"/><rect x="1108" y="762" width="6" height="44"/>
+</g>
+<path d="M890,806 L890,790 q30,-12 58,0 t58,0 t62,0 L1120,806 Z" fill="#23262e"/>
+<text x="898" y="700" font-size="11" font-weight="700" fill="#23262e">④ 碎石坡 → 泥沼：水汽柱带</text>
+<text x="898" y="718" font-size="9" fill="#6a6f78">实心细竖柱阵列（宽6/间距14/高度抖动）</text>
+
+<text x="640" y="834" font-size="11" font-weight="700" fill="#b84c46">⚠ 纯剪影纪律：全图 0 处半透（半透 = 渐变 = 违反定义）。层次一律靠「高度分层 / 形状 / 疏密」，不靠 alpha</text>
+<text x="640" y="854" font-size="11" fill="#23262e">裁剪口径：复用 `_draw_world_height()` 的 vis_r，往上扩 max_sil_h；成片分段 ≤256；按包围盒 AABB，不按格</text>
+<text x="640" y="868" font-size="11" fill="#b84c46">层级：画在 `Game._draw()` 内（父节点 `_draw()` 先于子节点 ⇒ 永远在实体之下 ⇒ 永不遮人、永不丢敌情）；不走 FgLayer（原 `_draw_ridges()` 已随云/远山一并删除）。⚠ **2026-10-18 用户改方向「先不做美术」⇒ 本档停工、代码未提交**（备份：`桌面/_yl_F10_主城剪影_半成品.patch` + git stash）</text>
+<text x="640" y="876" font-size="10" fill="#6a6f78">开关：F10 独立、默认 off；FgLayer 复用（节点），F9/F10 各判自己 flag —— 不许合并</text>
+<text x="640" y="894" font-size="10" fill="#6a6f78">判不准：秘境 6 座坐标待同心层落位 · 玄甲印去向待用户定 · 云/远山顺序待抓帧</text>
+<text x="640" y="910" font-size="10" fill="#b84c46">⚠ B 档（野外）双重依赖：①「南向裙边」落地（判据 = 单条最大暗缝高 ≤32）② 同心层落地（现 ZONES 仍是四象限）</text>
+</svg>

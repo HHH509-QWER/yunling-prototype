@@ -69,7 +69,8 @@ func _ready() -> void:
 	## 素色直出：关掉一切会染色/挡画面的叠层（见头注释）
 	## ⚠️ HUD 也关：底栏/右上角面板是深色半透，像素统计会把它们数进"未覆盖"。
 	if a.has("--flat"):
-		game.set("debug_flat", true)
+		## ⚠️ M33：原来这里还调了 `game.set("debug_flat", true)` —— 那个变量已经删了：
+		##    **没有任何绘制代码读过它**，真正起作用的是下面这几行（直接关叠层）。
 		for n in game.get_children():
 			if n is CanvasModulate:
 				n.color = Color.WHITE
