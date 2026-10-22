@@ -130,7 +130,7 @@ var _fail_labels: Array = []
 ##    断言数本来就随代码增长而变。**锁死"恰好 584"是脆的**：谁加一条断言就红，谁删一条也红，
 ##    两种红长得一样，逼人去人工判断"是涨了还是跌了"—— 而人工判断正是会漏的环节。
 ##    所以只锁下界：只能涨不能跌。删断言 → 红；加断言 → 绿并打印实际值。
-const SELFTEST_MIN := 668
+const SELFTEST_MIN := 689
 ## 自测**有没有跑完**的标记（防假绿灯，见 `_selftest_finish()`）。
 var _st_started := false
 var _st_done := false
@@ -5608,6 +5608,101 @@ func _run_selftest_body() -> void:
 			and int(GameData.ENEMY["变异矿鬼"]["stone"]) == 6, "对不上")
 	_check("精英还有一份 bonus_drop 与残片（ELITE 表）",
 			GameData.ELITE.has("bonus_drop") and str(GameData.ELITE["shard"]) == "精印残片", "缺字段")
+
+	# ==================== M36：合炼面板的四个页面（融合 / 破阶 / 凝结）====================
+	# ⭐ 验收：M35 把三条规则做进了逻辑层，这一段验「玩家真的够得着它们」——
+	#    页面存在、页面之间能转、每一页上的按钮真的会调到对应的逻辑。
+
+	_check("合炼面板有四个页签（合炼 / 融合 / 破阶 / 凝结）",
+			forge_panel.PAGE_NAMES.size() == 4, str(forge_panel.PAGE_NAMES))
+	forge_panel.open(self)
+	_check("打开时停在合炼页（老流程不能被新页面挤掉）",
+			forge_panel.page == forge_panel.PAGE_FORGE and forge_panel.visible,
+			"page=%d" % forge_panel.page)
+	forge_panel.next_page(1)
+	_check("→ 换到融合页", forge_panel.page == forge_panel.PAGE_FUSE, "page=%d" % forge_panel.page)
+	forge_panel.next_page(-1)
+	_check("← 换回合炼页（不会绕出去）", forge_panel.page == forge_panel.PAGE_FORGE,
+			"page=%d" % forge_panel.page)
+	forge_panel.next_page(-1)
+	_check("在合炼页再按 ← 会绕到最后一页（循环而不是卡死）",
+			forge_panel.page == forge_panel.PAGE_CONDENSE, "page=%d" % forge_panel.page)
+
+	# ---- 1. 凝结：残片 → 完整的印 ----
+	player.essence = 999.0
+	var m36_no_shard: Dictionary = player.can_condense("通印残片")
+	_check("残片不够时凝结被拒", not bool(m36_no_shard["ok"])
+			and str(m36_no_shard["reason"]).contains("残片不够"), str(m36_no_shard))
+	player.bag.items["通印残片"] = int(GameData.SHARDS["通印残片"]["count"])
+	forge_panel.set_page(forge_panel.PAGE_CONDENSE)
+	## ⚠️ 面板默认选第一档（凡印残片），要显式点到通印那一行 —— 这也顺便验了「能选」。
+	forge_panel.shard_idx = maxi(0, forge_panel.shard_names().find("通印残片"))
+	var m36_cd: Dictionary = forge_panel.do_condense()
+	_check("凝结成功（10 片通印残片 → 熔岩印）",
+			bool(m36_cd.get("ok", false)) and str(m36_cd.get("seal", "")) == "熔岩印", str(m36_cd))
+	_check("残片被收走（不是白给）", player.bag.count("通印残片") == 0,
+			"还剩 %d 片" % player.bag.count("通印残片"))
+	_check("凝结出来的印真的进了收藏", player.has_seal("熔岩印"), "没拿到")
+	player.bag.items["通印残片"] = int(GameData.SHARDS["通印残片"]["count"])
+	var m36_dup: Dictionary = player.can_condense("通印残片")
+	_check("已经有这枚印时拒绝凝结（别白吃 10 片残片）",
+			not bool(m36_dup["ok"]) and str(m36_dup["reason"]).contains("已经有"),
+			str(m36_dup))
+	player.bag.items.erase("通印残片")
+
+	# ---- 2. 融合页 ----
+	player.essence = 999.0
+	for m36_s in ["落叶印", "泥巴印"]:
+		if not player.has_seal(str(m36_s)):
+			player.gain_seal(str(m36_s))
+	forge_panel.set_page(forge_panel.PAGE_FUSE)
+	var m36_mains: Array = forge_panel.owned_names()
+	_check("融合页能列出玩家手上的印", m36_mains.size() >= 3, str(m36_mains))
+	forge_panel.fuse_main = maxi(0, m36_mains.find("落叶印"))
+	_check("主印能选中落叶印（下标对得上）",
+			forge_panel.fuse_main_name() == "落叶印", forge_panel.fuse_main_name())
+	var m36_subs: Array = forge_panel.fusible_subs()
+	_check("副印列表里**没有**组合印（组合印不能再被吸收）",
+			not m36_subs.has("熔岩印"), str(m36_subs))
+	_check("副印列表里也没有主印自己", not m36_subs.has("落叶印"), str(m36_subs))
+	forge_panel.fuse_sub = maxi(0, m36_subs.find("泥巴印"))
+	var m36_pv: Dictionary = forge_panel.fuse_preview()
+	_check("融合页能算出预览（成本 / 融词条 / 上限）",
+			not m36_pv.is_empty() and float(m36_pv["cost"]) > 0.0
+			and int(m36_pv["limit"]) >= 1, str(m36_pv))
+	var m36_fz: Dictionary = forge_panel.do_fuse(0.0)
+	_check("在面板上点「融合」会真的融合成功",
+			bool(m36_fz.get("ok", false)) and bool(m36_fz.get("success", false)), str(m36_fz))
+	_check("副印被面板这一下吃掉了", not player.has_seal("泥巴印"), "泥巴印还在")
+
+	# ---- 3. 破阶页 ----
+	player.gain_seal("泥巴印")                 # 上面刚被吃掉，重新发一枚当祭品
+	player.seal_refine["落叶印"] = float(GameData.REFINE["max"])
+	player.bag.items["地火芯"] = 3
+	forge_panel.set_page(forge_panel.PAGE_UPGRADE)
+	forge_panel.up_seal = maxi(0, forge_panel.owned_names().find("落叶印"))
+	forge_panel.up_cat = 0
+	var m36_pool: Array = forge_panel.up_fodder_pool()
+	_check("祭品池只收**同阶**印（落叶印 rank1 → 泥巴印可以，熔岩印 rank3 不行）",
+			m36_pool.has("泥巴印") and not m36_pool.has("熔岩印"), str(m36_pool))
+	forge_panel.up_fodder = 0
+	var m36_pv0: Dictionary = forge_panel.upgrade_preview()
+	forge_panel.up_fodder = 1
+	var m36_pv1: Dictionary = forge_panel.upgrade_preview()
+	_check("多投 1 枚祭品，面板上的成功率从 30% 涨到 50%",
+			is_equal_approx(float(m36_pv0["chance"]), 0.30) and is_equal_approx(float(m36_pv1["chance"]), 0.50),
+			"%.2f → %.2f" % [float(m36_pv0["chance"]), float(m36_pv1["chance"])])
+	## ⚠️ 面板按「祭品池顺序」取前 N 枚，**不保证**是哪一枚 —— 断言要跟着它实际吃的那枚走。
+	var m36_eaten: String = str(m36_pool[0]) if not m36_pool.is_empty() else ""
+	var m36_rk0: int = player.rank_of("落叶印")
+	var m36_up: Dictionary = forge_panel.do_upgrade(0.0)
+	_check("在面板上点「破阶」会真的升一等",
+			bool(m36_up.get("ok", false)) and bool(m36_up.get("success", false))
+			and player.rank_of("落叶印") == m36_rk0 + 1, str(m36_up))
+	_check("祭品被吃掉了（破阶要付代价）",
+			m36_eaten != "" and not player.has_seal(m36_eaten),
+			"被吃的祭品 %s 还在；up=%s pool=%s" % [m36_eaten, str(m36_up), str(m36_pool)])
+	forge_panel.close()
 
 	_st_done = true                  # ⭐ 只有全程没抛异常才会走到这（假绿灯的判据）
 

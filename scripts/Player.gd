@@ -964,6 +964,67 @@ func is_rooted() -> bool:
 	return _root_left > 0.0
 
 
+## ⭐ 凝结残片（§5）：10 片残片 + 灵力 → 一枚完整的印。
+##    ⚠️ 目标印在 `SHARDS` 表里写死（不是随机抽）—— 「攒够就有确定的回报」才叫保底。
+##    ⚠️ 目标印已经有的情况下**拒绝**：同一枚印只有一份，白吃掉 10 片残片是坑人。
+func condense_shard(shard_name: String) -> Dictionary:
+	if not GameData.SHARDS.has(shard_name):
+		return {"ok": false, "reason": "没有这种残片"}
+	var cfg: Dictionary = GameData.SHARDS[shard_name]
+	var need := int(cfg["count"])
+	var have := bag.count(shard_name)
+	if have < need:
+		return {"ok": false, "reason": "残片不够（%d/%d）" % [have, need]}
+	var target := str(cfg["shard"])
+	if has_seal(target):
+		return {"ok": false, "reason": "已经有%s了" % target}
+	var cost := float(cfg["essence"])
+	if essence < cost:
+		return {"ok": false, "reason": "灵力不足（要 %.0f）" % cost}
+	bag.remove(shard_name, need)
+	essence -= cost
+	gain_seal(target)
+	queue_redraw()
+	return {"ok": true, "reason": "", "seal": target}
+
+
+## 凝结的**可做性**（面板用它画灰/亮，别让 `condense_shard` 去猜）。
+## ⚠️ 判定与执行共用 `_condense_check`：两处各写一套一定会漂。
+func can_condense(shard_name: String) -> Dictionary:
+	return _condense_check(shard_name)
+
+
+func _condense_check(shard_name: String) -> Dictionary:
+	if not GameData.SHARDS.has(shard_name):
+		return {"ok": false, "reason": "没有这种残片"}
+	var cfg: Dictionary = GameData.SHARDS[shard_name]
+	var need := int(cfg["count"])
+	var have := bag.count(shard_name)
+	if have < need:
+		return {"ok": false, "reason": "残片不够（%d/%d）" % [have, need]}
+	var target := str(cfg["shard"])
+	if has_seal(target):
+		return {"ok": false, "reason": "已经有%s了" % target}
+	if essence < float(cfg["essence"]):
+		return {"ok": false, "reason": "灵力不足（要 %.0f）" % float(cfg["essence"])}
+	return {"ok": true, "reason": ""}
+
+
+## 手上能当破阶祭品的印（**同阶**、不是主印、不是本命印）。
+func upgrade_fodder_for(name_key: String) -> Array:
+	var out: Array = []
+	if not has_seal(name_key):
+		return out
+	for n in owned_seal_names():
+		var nn := str(n)
+		if nn == name_key or not can_use_as_material(nn):
+			continue
+		if rank_of(nn) != rank_of(name_key):
+			continue
+		out.append(nn)
+	return out
+
+
 ## 回血（云雨印那种）。⭐ 不超过上限 —— 溢出的部分直接丢掉，不攒着。返回实际回了多少。
 func heal(amount: float) -> float:
 	if _dead or amount <= 0.0:
@@ -1696,10 +1757,22 @@ func upgrade_seal(name_key: String, fodder: Array, catalyst := "", env_ok := tru
 	var ok := can_upgrade_seal(name_key, catalyst, env_ok)
 	if not bool(ok["ok"]):
 		return {"ok": false, "reason": str(ok["reason"])}
+	## ⭐ 祭品规则：**同阶**（不是同名）。
+	##    为什么改：`gain_seal()` 保证「同一枚印只有一份」（设计圣经 §2.1 同时唯一性），
+	##    所以「同名祭品」在这套规则下**永远不存在** —— 照抄设计会得到一条死规则。
+	##    改成同阶之后，落叶印 / 泥巴印（§2.1 明写「垫子 / 辅材」）终于有了它们被设计出来的用途。
 	var fodders: Array = []
 	for f in fodder:
-		if str(f) == name_key and has_seal(str(f)) and can_use_as_material(str(f)):
-			fodders.append(str(f))
+		var fname := str(f)
+		if fname == name_key:
+			continue                     # 主印自己不能当祭品
+		if not has_seal(fname) or not can_use_as_material(fname):
+			continue
+		if rank_of(fname) != rank_of(name_key):
+			continue                     # 只有同阶能当祭品
+		if fodders.has(fname):
+			continue
+		fodders.append(fname)
 	if fodders.size() > int(GameData.UPGRADE["fodder_max"]):
 		fodders = fodders.slice(0, int(GameData.UPGRADE["fodder_max"]))
 
