@@ -1,6 +1,9 @@
 ## 把 4 张 1024×1024 的「正面行走」序列帧做成和 p4_d.png 同规格的 192 画布素材。
 ##
-## 输入：`C:/Users/Administrator/Desktop/photo/walk_south_v4_frame1..4.png`（白底）
+## 输入：`art/incoming/player_walk_south/walk_south_v4_frame1..4.png`（白底，1024×1024）
+##       ⚠️ `art/incoming/` 是 **gitignored** 的原始素材投放区，所以这个脚本在别人机器上
+##          默认跑不起来（读不到图）—— 这是有意的：仓库里只放**成品**，不放 34MB 原图。
+##          要用自己的图就传 `--src=<目录>`（见下面「跑法」）。
 ## 输出：`art/units_hd/p4_d_walk_1..4.png`（192×192，人物 48 高，脚底在第 191 行，水平居中）
 ##
 ## ⚠️ 和 build_player_4dir.gd 的关键差别：**四帧共用同一个缩放系数**。
@@ -10,9 +13,11 @@
 ##
 ## 跑法（无头）：
 ##   Godot_v4.7.2-stable_win64_console.exe --headless --path . --script res://art/tools/build_walk_south.gd
+##   换一套图：在 `--script ...` 后面加 `-- --src=res://art/incoming/player_walk_south`
 extends SceneTree
 
-const SRC_DIR := "C:/Users/Administrator/Desktop/photo"
+## 默认读 gitignored 的投放区；⚠️ **不要写死个人机器的绝对路径** —— 这是公开仓库。
+const SRC_DIR_DEFAULT := "res://art/incoming/player_walk_south"
 const SRC := [
 	"walk_south_v4_frame1.png",
 	"walk_south_v4_frame2.png",
@@ -29,12 +34,19 @@ const PROC_MAX := 512    # 处理时的最大边长（够用且泛洪快）
 
 
 func _init() -> void:
+	## `--src=<目录>` 覆盖默认投放区（目录可以是 res:// 也可以是绝对路径 ——
+	## 但**默认值里不许出现个人机器路径**，这是公开仓库）。
+	var src_dir := SRC_DIR_DEFAULT
+	for arg in OS.get_cmdline_user_args():
+		if str(arg).begins_with("--src="):
+			src_dir = str(arg).substr(6)
 	var cuts: Array = []
 	for name in SRC:
-		var p := "%s/%s" % [SRC_DIR, name]
+		var p := "%s/%s" % [src_dir, name]
 		var img := _load(p)
 		if img == null:
 			print("FAIL 读图失败：", p)
+			print("     原始素材放在 gitignored 的 art/incoming/ 里；换目录用 --src=<目录>")
 			quit(1)
 			return
 		cuts.append(_cut(img))
